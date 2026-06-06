@@ -1,0 +1,9 @@
+[build]
+rootDirectory = "clm-studio-v2"
+
+[deploy]
+startCommand = "uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT"
+
+[build.variables]
+RAILPACK_INSTALL_CMD = "pip install -r backend/requirements.txt"
+RAILPACK_PYTHON_VERSION = "3.13"
