@@ -1,0 +1,137 @@
+{
+  "site": {
+    "zh": {
+      "studio_name": "創模工作室",
+      "english_name": "Create Large Model (CLM)",
+      "tagline": "Create Beyond Limits.",
+      "hero_title": "讓 AI、系統與商業策略真正落地",
+      "hero_subtitle": "創模工作室專注於 AI 串接、客製化 AI、網站與系統開發、自動化整合、RAG、AI Agent、資安檢查、SEO 與商業研究，協助企業把想法轉成可實際營運的成果。",
+      "about_title": "關於創模工作室",
+      "about_content": "創模工作室（Create Large Model）致力於運用人工智慧技術，協助企業、品牌與創業者打造更高效、更智慧的工作模式。\n\n我們相信，AI 不只是工具，而是一種能夠放大創意、提升效率、創造價值的新力量。",
+      "contact_title": "聯絡我們",
+      "contact_note": "歡迎透過 Email、GitHub、LINE 或其他官方管道與我們聯絡，也可在這裡放置預約、表單或作品集連結。"
+    },
+    "en": {
+      "studio_name": "CLM Studio",
+      "english_name": "Create Large Model (CLM)",
+      "tagline": "Create Beyond Limits.",
+      "hero_title": "Turn AI, systems, and strategy into real business outcomes",
+      "hero_subtitle": "CLM Studio helps companies turn ideas into operational products through AI integration, custom AI systems, websites, automation, RAG, AI agents, security reviews, SEO, and market research.",
+      "about_title": "About CLM Studio",
+      "about_content": "Create Large Model (CLM) is dedicated to helping companies, brands, and founders build more efficient and intelligent ways of working through applied AI and digital systems.",
+      "contact_title": "Contact",
+      "contact_note": "Use this section for email, GitHub, LINE, booking forms, or official external links."
+    },
+    "branding": {
+      "logo_path": "/uploads/clm-logo-source.png",
+      "hero_image_path": "/uploads/clm-hero-source.png"
+    }
+  },
+  "services": {
+    "zh": [
+      {
+        "title": "AI 串接與智慧客服",
+        "description": "整合客服、表單、CRM、知識庫與內部系統，讓 AI 成為真正的營運能力。"
+      },
+      {
+        "title": "客製化 AI / RAG / Agent",
+        "description": "打造企業專屬 AI、知識問答系統、AI Agent 與內部工具。"
+      },
+      {
+        "title": "網站與系統開發",
+        "description": "提供品牌官網、前後端分離網站、後台系統、API 與商業平台建置。"
+      },
+      {
+        "title": "自動化整合",
+        "description": "串接跨服務流程，減少人工重複操作，強化營運效率。"
+      },
+      {
+        "title": "資安檢查",
+        "description": "針對網站、系統、資料流與權限結構進行安全檢視與改善建議。"
+      },
+      {
+        "title": "商業研究 / SEO / 技術顧問",
+        "description": "從市場調研到 SEO 與技術規劃，提供可執行的商業與技術建議。"
+      }
+    ],
+    "en": [
+      {
+        "title": "AI Integration & Smart Support",
+        "description": "Connect AI with support, forms, CRM, knowledge bases, and internal systems."
+      },
+      {
+        "title": "Custom AI / RAG / Agents",
+        "description": "Build tailored AI assistants, knowledge systems, RAG tools, and AI agents."
+      },
+      {
+        "title": "Web & System Development",
+        "description": "Deliver websites, admin systems, APIs, and business platforms with separated frontend and backend."
+      },
+      {
+        "title": "Automation & Workflow Integration",
+        "description": "Connect services and automate repetitive operational tasks."
+      },
+      {
+        "title": "Security Review",
+        "description": "Assess websites, systems, data flows, and access structures from a security perspective."
+      },
+      {
+        "title": "Research / SEO / Technical Consulting",
+        "description": "Support market research, SEO planning, and technical strategy."
+      }
+    ]
+  },
+  "portfolio": [
+    {
+      "id": "ai-integration-suite",
+      "category": "AI Integration",
+      "cover_image": "/uploads/clm-hero-source.png",
+      "open_in_new_page": true,
+      "external_url": "",
+      "zh": {
+        "title": "AI 串接與智慧客服整合",
+        "summary": "整合客服、知識庫、表單與後台系統，提升回應效率與流程自動化能力。",
+        "detail": "適合展示大型專案時使用，可放置完整案例頁、系統架構、流程圖與成果說明。",
+        "tech_stack": [
+          "LLM",
+          "RAG",
+          "API Integration",
+          "Automation"
+        ]
+      },
+      "en": {
+        "title": "AI Support & Workflow Integration",
+        "summary": "Connect support flows, knowledge bases, forms, and back-office systems.",
+        "detail": "Designed for larger case-study pages with architecture, flow diagrams, and outcome details.",
+        "tech_stack": [
+          "LLM",
+          "RAG",
+          "API Integration",
+          "Automation"
+        ]
+      }
+    }
+  ],
+  "contacts": [
+    {
+      "label": "LINE",
+      "url": "https://line.me/R/ti/p/@your-line-id"
+    },
+    {
+      "label": "Facebook",
+      "url": "https://facebook.com/your-page"
+    },
+    {
+      "label": "Instagram",
+      "url": "https://instagram.com/your-page"
+    },
+    {
+      "label": "Email",
+      "url": "mailto:hello@clm-studio.com"
+    },
+    {
+      "label": "GitHub",
+      "url": "https://github.com/"
+    }
+  ]
+}
