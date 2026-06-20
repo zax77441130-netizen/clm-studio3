@@ -1,0 +1,1007 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>CLM 後台管理</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <div class="container section">
+    <div id="adminGate" class="card" style="max-width:560px;margin:0 auto">
+      <div class="section-tag">Admin</div>
+      <h1 class="section-title">後台登入</h1>
+      <p class="section-subtitle">先輸入管理密碼。登入成功後，才會顯示後台內容。</p>
+      <div class="field-group">
+        <label>Admin Token</label>
+        <input id="token" type="password" placeholder="輸入管理 token">
+      </div>
+      <div class="card-actions">
+        <button class="btn btn-secondary" type="button" onclick="togglePassword()">顯示 / 隱藏密碼</button>
+        <button class="btn btn-primary" type="button" onclick="unlockAdmin()">進入後台</button>
+      </div>
+      <p id="attempts" class="helper">剩餘嘗試次數載入中...</p>
+      <p id="status" class="helper"></p>
+    </div>
+
+    <div id="adminApp" style="display:none">
+      <div class="section-tag">Admin</div>
+      <h1 class="section-title">CLM 可交付版後台</h1>
+      <p class="section-subtitle">這版把前台文案、SEO 模板、作品模板、媒體規則、fallback 與 schema 都放進可編輯資料結構，之後正式上線到網域也能繼續在後台調整。</p>
+
+      <div class="card">
+        <h3>0. 操作提醒</h3>
+        <div class="table-list">
+          <div class="mini-card">1. 先改全域內容 / 內容頁 / SEO / 模板</div>
+          <div class="mini-card">2. 再整理服務、作品與媒體</div>
+          <div class="mini-card">3. 作品區記得按「套用目前作品」與「套用目前媒體」</div>
+          <div class="mini-card">4. 最後按「一鍵儲存全部內容」</div>
+        </div>
+        <div class="card-actions">
+          <button class="btn btn-secondary" onclick="loadSite()">重新載入目前資料</button>
+          <button class="btn btn-primary" onclick="saveAll()">一鍵儲存全部內容</button>
+          <button class="btn btn-secondary" onclick="logoutAdmin()">登出</button>
+          <a class="btn btn-secondary" href="/seo-check" target="_blank" rel="noopener noreferrer">打開 SEO 檢查頁</a>
+        </div>
+        <p id="status2" class="helper"></p>
+      </div>
+
+      <div class="card" style="margin-top:18px">
+        <h3>1. 前端全域內容</h3>
+        <p class="helper">品牌名、首頁主副標、關於與聯絡的主要內容。這些是正式前台會直接用到的內容。</p>
+        <div class="admin-grid">
+          <div>
+            <div class="field-group">
+              <label>中文內容</label>
+              <input id="studio_name_zh" placeholder="品牌名稱（中文）">
+              <input id="english_name_zh" placeholder="英文品牌名（顯示於中文站）">
+              <input id="tagline_zh" placeholder="首頁標語（中文）">
+              <input id="hero_title_zh" placeholder="首頁主標（中文）">
+              <textarea id="hero_subtitle_zh" rows="5" placeholder="首頁副標（中文）"></textarea>
+              <input id="about_title_zh" placeholder="關於頁標題（中文）">
+              <textarea id="about_content_zh" rows="7" placeholder="關於頁內容（中文）"></textarea>
+              <input id="contact_title_zh" placeholder="聯絡頁標題（中文）">
+              <textarea id="contact_note_zh" rows="6" placeholder="聯絡頁說明（中文）"></textarea>
+            </div>
+          </div>
+          <div>
+            <div class="field-group">
+              <label>英文內容</label>
+              <input id="studio_name_en" placeholder="品牌名稱（英文站顯示）">
+              <input id="english_name_en" placeholder="英文品牌名（英文站）">
+              <input id="tagline_en" placeholder="首頁標語（英文）">
+              <input id="hero_title_en" placeholder="首頁主標（英文）">
+              <textarea id="hero_subtitle_en" rows="5" placeholder="首頁副標（英文）"></textarea>
+              <input id="about_title_en" placeholder="關於頁標題（英文）">
+              <textarea id="about_content_en" rows="7" placeholder="關於頁內容（英文）"></textarea>
+              <input id="contact_title_en" placeholder="聯絡頁標題（英文）">
+              <textarea id="contact_note_en" rows="6" placeholder="聯絡頁說明（英文）"></textarea>
+            </div>
+          </div>
+        </div>
+        <div class="admin-grid" style="margin-top:16px">
+          <div>
+            <div class="field-group">
+              <label>Logo / 頭像</label>
+              <div class="asset-picker">
+                <input id="branding_logo_path" placeholder="Logo 路徑會自動填入，也可手動貼網址">
+                <div class="asset-picker-row">
+                  <input type="file" id="branding_logo_file" accept="image/*,.heic,.heif">
+                  <button class="btn btn-secondary" type="button" onclick="uploadAssetToField('branding_logo_file','branding_logo_path','branding_logo_preview')">上傳並套用 Logo</button>
+                </div>
+                <div class="asset-preview" id="branding_logo_preview"><span>尚未選擇 Logo</span></div>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="field-group">
+              <label>首頁封面圖</label>
+              <div class="asset-picker">
+                <input id="branding_hero_image_path" placeholder="首頁封面圖路徑會自動填入，也可手動貼網址">
+                <div class="asset-picker-row">
+                  <input type="file" id="branding_hero_file" accept="image/*,.heic,.heif">
+                  <button class="btn btn-secondary" type="button" onclick="uploadAssetToField('branding_hero_file','branding_hero_image_path','branding_hero_preview')">上傳並套用封面圖</button>
+                </div>
+                <div class="asset-preview" id="branding_hero_preview"><span>尚未選擇首頁封面圖</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:18px">
+        <h3>2. 聯絡方式與連結</h3>
+        <p class="helper">LINE / Facebook / Instagram / Email / 其他自訂連結都在這裡管理。</p>
+        <div class="field-group">
+          <div class="table-list" id="contacts_list"></div>
+        </div>
+        <div class="card-actions">
+          <button class="btn btn-secondary" onclick="addContactRow('', '')">新增自訂連結</button>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:18px">
+        <h3>3. SEO 基本設定與各頁正式內容</h3>
+        <p class="helper">這一區是目前實際套用在前台的 SEO 內容，不是模板。模板請看下一區。</p>
+        <div class="field-group">
+          <label>SEO 基本設定</label>
+          <input id="seo_site_url" placeholder="正式網站網址，例如 https://yourdomain.com">
+          <input id="seo_site_name" placeholder="網站名稱，例如 CLM Studio">
+          <input id="seo_default_title" placeholder="預設標題">
+          <textarea id="seo_default_description" rows="3" placeholder="預設描述"></textarea>
+          <input id="seo_title_template" placeholder="標題模板，例如 %s | CLM Studio">
+          <input id="seo_default_keywords" placeholder="預設關鍵字，以逗號分隔">
+          <input id="seo_robots" placeholder="robots，例如 index, follow, max-image-preview:large">
+          <input id="seo_twitter_card" placeholder="twitter card，例如 summary_large_image">
+          <label>SEO / 分享圖（OG 圖）</label>
+          <div class="asset-picker">
+            <input id="seo_default_og_image" placeholder="SEO 圖片路徑會自動填入，也可手動貼網址">
+            <div class="asset-picker-row">
+              <input type="file" id="seo_og_file" accept="image/*,.heic,.heif">
+              <button class="btn btn-secondary" type="button" onclick="uploadAssetToField('seo_og_file','seo_default_og_image','seo_og_preview')">上傳並套用 SEO 圖片</button>
+            </div>
+            <div class="asset-preview" id="seo_og_preview"><span>尚未選擇 SEO 圖片</span></div>
+          </div>
+        </div>
+        <div class="admin-grid" style="margin-top:16px">
+          <div>
+            <div class="field-group">
+              <label>中文頁面 SEO</label>
+              <input id="seo_home_title_zh" placeholder="首頁 SEO Title（中文）">
+              <textarea id="seo_home_description_zh" rows="3" placeholder="首頁 SEO Description（中文）"></textarea>
+              <input id="seo_about_title_zh" placeholder="關於頁 SEO Title（中文）">
+              <textarea id="seo_about_description_zh" rows="3" placeholder="關於頁 SEO Description（中文）"></textarea>
+              <input id="seo_services_title_zh" placeholder="服務頁 SEO Title（中文）">
+              <textarea id="seo_services_description_zh" rows="3" placeholder="服務頁 SEO Description（中文）"></textarea>
+              <input id="seo_portfolio_title_zh" placeholder="作品集頁 SEO Title（中文）">
+              <textarea id="seo_portfolio_description_zh" rows="3" placeholder="作品集頁 SEO Description（中文）"></textarea>
+              <input id="seo_contact_title_zh" placeholder="聯絡頁 SEO Title（中文）">
+              <textarea id="seo_contact_description_zh" rows="3" placeholder="聯絡頁 SEO Description（中文）"></textarea>
+            </div>
+          </div>
+          <div>
+            <div class="field-group">
+              <label>英文頁面 SEO</label>
+              <input id="seo_home_title_en" placeholder="首頁 SEO Title（英文）">
+              <textarea id="seo_home_description_en" rows="3" placeholder="首頁 SEO Description（英文）"></textarea>
+              <input id="seo_about_title_en" placeholder="關於頁 SEO Title（英文）">
+              <textarea id="seo_about_description_en" rows="3" placeholder="關於頁 SEO Description（英文）"></textarea>
+              <input id="seo_services_title_en" placeholder="服務頁 SEO Title（英文）">
+              <textarea id="seo_services_description_en" rows="3" placeholder="服務頁 SEO Description（英文）"></textarea>
+              <input id="seo_portfolio_title_en" placeholder="作品集頁 SEO Title（英文）">
+              <textarea id="seo_portfolio_description_en" rows="3" placeholder="作品集頁 SEO Description（英文）"></textarea>
+              <input id="seo_contact_title_en" placeholder="聯絡頁 SEO Title（英文）">
+              <textarea id="seo_contact_description_en" rows="3" placeholder="聯絡頁 SEO Description（英文）"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:18px">
+        <h3>4. SEO 模板 / 示範格式</h3>
+        <p class="helper">這一區是給客戶看的填寫示範，不會直接強塞到前台正式內容。可把它當成「後台內建填寫說明」。</p>
+        <div class="table-list" style="margin-bottom:16px">
+          <div class="mini-card">正式前台內容：改上面 SEO 正式欄位後，前台會直接更新</div>
+          <div class="mini-card">模板示範內容：改這區是為了教對方怎麼填，不會直接覆蓋前台</div>
+          <div class="mini-card">作品模板：教對方怎麼寫標題、摘要、詳細介紹、技術標籤與作品 SEO</div>
+          <div class="mini-card">媒體模板：教對方怎麼寫 alt / title / caption，以及圖片、影片、embed 的建議格式</div>
+        </div>
+        <div class="admin-grid">
+          <div>
+            <div class="field-group">
+              <label>中文 SEO 模板</label>
+              <textarea id="template_home_title_zh" rows="4" placeholder="首頁 SEO title 示範格式"></textarea>
+              <textarea id="template_home_description_zh" rows="4" placeholder="首頁 SEO description 示範格式"></textarea>
+              <textarea id="template_about_title_zh" rows="4" placeholder="關於頁 SEO title 示範格式"></textarea>
+              <textarea id="template_about_description_zh" rows="4" placeholder="關於頁 SEO description 示範格式"></textarea>
+              <textarea id="template_services_title_zh" rows="4" placeholder="服務頁 SEO title 示範格式"></textarea>
+              <textarea id="template_services_description_zh" rows="4" placeholder="服務頁 SEO description 示範格式"></textarea>
+              <textarea id="template_portfolio_title_zh" rows="4" placeholder="作品集頁 SEO title 示範格式"></textarea>
+              <textarea id="template_portfolio_description_zh" rows="4" placeholder="作品集頁 SEO description 示範格式"></textarea>
+              <textarea id="template_contact_title_zh" rows="4" placeholder="聯絡頁 SEO title 示範格式"></textarea>
+              <textarea id="template_contact_description_zh" rows="4" placeholder="聯絡頁 SEO description 示範格式"></textarea>
+            </div>
+            <div class="field-group" style="margin-top:16px">
+              <label>英文 SEO 模板</label>
+              <textarea id="template_home_title_en" rows="4" placeholder="Home SEO title template"></textarea>
+              <textarea id="template_home_description_en" rows="4" placeholder="Home SEO description template"></textarea>
+              <textarea id="template_about_title_en" rows="4" placeholder="About SEO title template"></textarea>
+              <textarea id="template_about_description_en" rows="4" placeholder="About SEO description template"></textarea>
+              <textarea id="template_services_title_en" rows="4" placeholder="Services SEO title template"></textarea>
+              <textarea id="template_services_description_en" rows="4" placeholder="Services SEO description template"></textarea>
+              <textarea id="template_portfolio_title_en" rows="4" placeholder="Portfolio SEO title template"></textarea>
+              <textarea id="template_portfolio_description_en" rows="4" placeholder="Portfolio SEO description template"></textarea>
+              <textarea id="template_contact_title_en" rows="4" placeholder="Contact SEO title template"></textarea>
+              <textarea id="template_contact_description_en" rows="4" placeholder="Contact SEO description template"></textarea>
+            </div>
+          </div>
+          <div>
+            <div class="field-group">
+              <label>中文作品 / 媒體模板</label>
+              <textarea id="template_project_title_zh" rows="4" placeholder="作品標題格式"></textarea>
+              <textarea id="template_project_summary_zh" rows="4" placeholder="作品摘要格式"></textarea>
+              <textarea id="template_project_detail_zh" rows="5" placeholder="詳細介紹格式"></textarea>
+              <textarea id="template_project_tech_stack_zh" rows="4" placeholder="技術標籤格式"></textarea>
+              <textarea id="template_project_seo_title_zh" rows="4" placeholder="作品頁 SEO title 格式"></textarea>
+              <textarea id="template_project_seo_description_zh" rows="4" placeholder="作品頁 SEO description 格式"></textarea>
+              <textarea id="template_media_alt_zh" rows="4" placeholder="alt 怎麼寫"></textarea>
+              <textarea id="template_media_title_zh" rows="4" placeholder="title 怎麼寫"></textarea>
+              <textarea id="template_media_caption_zh" rows="4" placeholder="caption 怎麼寫"></textarea>
+              <textarea id="template_image_format_zh" rows="3" placeholder="圖片格式建議"></textarea>
+              <textarea id="template_video_format_zh" rows="3" placeholder="影片格式建議"></textarea>
+              <textarea id="template_embed_format_zh" rows="3" placeholder="embed 格式建議"></textarea>
+            </div>
+            <div class="field-group" style="margin-top:16px">
+              <label>英文作品 / 媒體模板</label>
+              <textarea id="template_project_title_en" rows="4" placeholder="Project title template"></textarea>
+              <textarea id="template_project_summary_en" rows="4" placeholder="Project summary template"></textarea>
+              <textarea id="template_project_detail_en" rows="5" placeholder="Project detail template"></textarea>
+              <textarea id="template_project_tech_stack_en" rows="4" placeholder="Tech stack template"></textarea>
+              <textarea id="template_project_seo_title_en" rows="4" placeholder="Project SEO title template"></textarea>
+              <textarea id="template_project_seo_description_en" rows="4" placeholder="Project SEO description template"></textarea>
+              <textarea id="template_media_alt_en" rows="4" placeholder="How to write alt"></textarea>
+              <textarea id="template_media_title_en" rows="4" placeholder="How to write media title"></textarea>
+              <textarea id="template_media_caption_en" rows="4" placeholder="How to write caption"></textarea>
+              <textarea id="template_image_format_en" rows="3" placeholder="Image format guidance"></textarea>
+              <textarea id="template_video_format_en" rows="3" placeholder="Video format guidance"></textarea>
+              <textarea id="template_embed_format_en" rows="3" placeholder="Embed format guidance"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:18px">
+        <h3>5. 前台內容區塊優化</h3>
+        <p class="helper">這區是首頁 / 關於 / 服務 / 聯絡的前台結構文案。可改，但仍維持後端可編輯，不會寫死在前端。</p>
+        <div class="admin-grid">
+          <div>
+            <div class="field-group">
+              <label>首頁（中文）</label>
+              <input id="content_home_section_tag_zh" placeholder="首頁區塊標籤（中文）">
+              <input id="content_home_headline_zh" placeholder="首頁區塊標題（中文）">
+              <textarea id="content_home_description_zh" rows="4" placeholder="首頁區塊說明（中文）"></textarea>
+              <textarea id="content_home_services_cta_title_zh" rows="3" placeholder="首頁服務導流標題（中文）"></textarea>
+              <textarea id="content_home_services_cta_description_zh" rows="3" placeholder="首頁服務導流說明（中文）"></textarea>
+              <textarea id="content_home_consultation_title_zh" rows="3" placeholder="首頁免費諮詢標題（中文）"></textarea>
+              <textarea id="content_home_consultation_description_zh" rows="3" placeholder="首頁免費諮詢說明（中文）"></textarea>
+              <label>首頁三個重點（中文）</label>
+              <input id="content_home_highlight_1_title_zh" placeholder="重點 1 標題">
+              <textarea id="content_home_highlight_1_description_zh" rows="2" placeholder="重點 1 說明"></textarea>
+              <input id="content_home_highlight_2_title_zh" placeholder="重點 2 標題">
+              <textarea id="content_home_highlight_2_description_zh" rows="2" placeholder="重點 2 說明"></textarea>
+              <input id="content_home_highlight_3_title_zh" placeholder="重點 3 標題">
+              <textarea id="content_home_highlight_3_description_zh" rows="2" placeholder="重點 3 說明"></textarea>
+            </div>
+            <div class="field-group" style="margin-top:18px">
+              <label>關於 / 服務 / 作品（中文）</label>
+              <input id="content_about_work_title_zh" placeholder="關於頁工作方式標題">
+              <textarea id="content_about_work_description_zh" rows="4" placeholder="關於頁工作方式說明"></textarea>
+              <input id="content_services_intro_zh" placeholder="服務頁導言">
+              <input id="content_services_cta_title_zh" placeholder="服務頁 CTA 標題">
+              <textarea id="content_services_cta_description_zh" rows="3" placeholder="服務頁 CTA 說明"></textarea>
+              <input id="content_portfolio_intro_zh" placeholder="作品集頁導言">
+            </div>
+            <div class="field-group" style="margin-top:18px">
+              <label>聯絡頁（中文）</label>
+              <input id="content_contact_project_title_zh" placeholder="聯絡頁專案區標題">
+              <textarea id="content_contact_project_description_zh" rows="3" placeholder="聯絡頁專案區說明"></textarea>
+              <textarea id="content_contact_project_helper_zh" rows="3" placeholder="聯絡頁專案區補充"></textarea>
+              <input id="content_contact_consultation_title_zh" placeholder="聯絡頁免費諮詢標題">
+              <textarea id="content_contact_consultation_description_zh" rows="3" placeholder="聯絡頁免費諮詢說明"></textarea>
+              <textarea id="content_contact_consultation_helper_zh" rows="3" placeholder="聯絡頁免費諮詢補充"></textarea>
+            </div>
+          </div>
+          <div>
+            <div class="field-group">
+              <label>Home (EN)</label>
+              <input id="content_home_section_tag_en" placeholder="Home section tag">
+              <input id="content_home_headline_en" placeholder="Home headline">
+              <textarea id="content_home_description_en" rows="4" placeholder="Home section description"></textarea>
+              <textarea id="content_home_services_cta_title_en" rows="3" placeholder="Home services CTA title"></textarea>
+              <textarea id="content_home_services_cta_description_en" rows="3" placeholder="Home services CTA description"></textarea>
+              <textarea id="content_home_consultation_title_en" rows="3" placeholder="Home consultation title"></textarea>
+              <textarea id="content_home_consultation_description_en" rows="3" placeholder="Home consultation description"></textarea>
+              <label>Home highlights (EN)</label>
+              <input id="content_home_highlight_1_title_en" placeholder="Highlight 1 title">
+              <textarea id="content_home_highlight_1_description_en" rows="2" placeholder="Highlight 1 description"></textarea>
+              <input id="content_home_highlight_2_title_en" placeholder="Highlight 2 title">
+              <textarea id="content_home_highlight_2_description_en" rows="2" placeholder="Highlight 2 description"></textarea>
+              <input id="content_home_highlight_3_title_en" placeholder="Highlight 3 title">
+              <textarea id="content_home_highlight_3_description_en" rows="2" placeholder="Highlight 3 description"></textarea>
+            </div>
+            <div class="field-group" style="margin-top:18px">
+              <label>About / Services / Portfolio (EN)</label>
+              <input id="content_about_work_title_en" placeholder="About work title">
+              <textarea id="content_about_work_description_en" rows="4" placeholder="About work description"></textarea>
+              <input id="content_services_intro_en" placeholder="Services intro">
+              <input id="content_services_cta_title_en" placeholder="Services CTA title">
+              <textarea id="content_services_cta_description_en" rows="3" placeholder="Services CTA description"></textarea>
+              <input id="content_portfolio_intro_en" placeholder="Portfolio intro">
+            </div>
+            <div class="field-group" style="margin-top:18px">
+              <label>Contact (EN)</label>
+              <input id="content_contact_project_title_en" placeholder="Contact project title">
+              <textarea id="content_contact_project_description_en" rows="3" placeholder="Contact project description"></textarea>
+              <textarea id="content_contact_project_helper_en" rows="3" placeholder="Contact project helper"></textarea>
+              <input id="content_contact_consultation_title_en" placeholder="Consultation title">
+              <textarea id="content_contact_consultation_description_en" rows="3" placeholder="Consultation description"></textarea>
+              <textarea id="content_contact_consultation_helper_en" rows="3" placeholder="Consultation helper"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:18px">
+        <h3>6. Services 管理</h3>
+        <p class="helper">每一列就是一個服務。直接改標題和描述即可。</p>
+        <div class="admin-grid">
+          <div>
+            <div class="field-group">
+              <label>中文服務項目</label>
+              <div class="card-actions" style="margin-top:0">
+                <button class="btn btn-secondary" type="button" onclick="addServiceItem('zh')">新增中文服務</button>
+                <button class="btn btn-secondary" type="button" onclick="seedDefaultServices('zh')">重設中文預設服務</button>
+                <button class="btn btn-primary" type="button" onclick="translateAllServicesToEnglish()">中文服務自動翻成英文</button>
+              </div>
+              <div id="services_zh_list" class="service-admin-list"></div>
+            </div>
+          </div>
+          <div>
+            <div class="field-group">
+              <label>英文服務項目</label>
+              <div class="card-actions" style="margin-top:0">
+                <button class="btn btn-secondary" type="button" onclick="addServiceItem('en')">新增英文服務</button>
+                <button class="btn btn-secondary" type="button" onclick="seedDefaultServices('en')">重設英文預設服務</button>
+              </div>
+              <div id="services_en_list" class="service-admin-list"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:18px">
+        <h3>7. 作品集管理</h3>
+        <p class="helper">作品標題、摘要、詳細介紹、技術標籤、作品頁 SEO 都在這裡。照模板填即可，不用自己亂猜。</p>
+        <div class="admin-grid">
+          <div>
+            <div class="field-group">
+              <label>選擇作品</label>
+              <select id="portfolio_select" onchange="loadPortfolioItem()"></select>
+              <input id="p_id" placeholder="作品 ID，例如 ai-integration-suite">
+              <input id="p_category" placeholder="分類，例如 AI / Web / System">
+              <input id="p_external_url" placeholder="外部連結（可空白）">
+              <label><input id="p_open_in_new_page" type="checkbox" style="width:auto"> 這個作品要有獨立內頁</label>
+              <label><input id="p_featured" type="checkbox" style="width:auto"> 這個作品要顯示在作品列表</label>
+              <label>作品封面</label>
+              <div class="asset-picker">
+                <input id="p_cover_image" placeholder="封面路徑會自動填入，也可手動貼網址">
+                <div class="asset-picker-row">
+                  <input type="file" id="portfolio_cover_file" accept="image/*,video/*,.mov,.mp4,.webm,.heic,.heif">
+                  <button class="btn btn-secondary" type="button" onclick="uploadAssetToField('portfolio_cover_file','p_cover_image','portfolio_cover_preview')">上傳並套用封面</button>
+                </div>
+                <div class="asset-preview" id="portfolio_cover_preview"><span>尚未選擇作品封面</span></div>
+              </div>
+            </div>
+            <div class="card-actions">
+              <button class="btn btn-secondary" onclick="newPortfolioItem()">新增作品</button>
+              <button class="btn btn-secondary" onclick="savePortfolioItem()">套用目前作品</button>
+              <button class="btn btn-secondary" onclick="deletePortfolioItem()">刪除目前作品</button>
+            </div>
+          </div>
+          <div>
+            <div class="field-group">
+              <input id="p_title_zh" placeholder="標題（中文）">
+              <input id="p_title_en" placeholder="標題（英文）">
+              <textarea id="p_summary_zh" rows="3" placeholder="摘要（中文）"></textarea>
+              <textarea id="p_summary_en" rows="3" placeholder="摘要（英文）"></textarea>
+              <textarea id="p_detail_zh" rows="6" placeholder="詳細內容（中文）"></textarea>
+              <textarea id="p_detail_en" rows="6" placeholder="詳細內容（英文）"></textarea>
+              <input id="p_tech_zh" placeholder="技術標籤（中文，以逗號分隔）">
+              <input id="p_tech_en" placeholder="技術標籤（英文，以逗號分隔）">
+              <input id="p_seo_title_zh" placeholder="作品頁 SEO Title（中文）">
+              <textarea id="p_seo_description_zh" rows="3" placeholder="作品頁 SEO Description（中文）"></textarea>
+              <input id="p_seo_title_en" placeholder="作品頁 SEO Title（英文）">
+              <textarea id="p_seo_description_en" rows="3" placeholder="作品頁 SEO Description（英文）"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:18px">
+        <h3>8. 作品媒體</h3>
+        <p class="helper">圖片 / 影片 / embed 都可以管理。alt、title、caption 都能一起維護。</p>
+        <p class="helper">Embed 使用方式：請把類型切到 embed，貼入合法 iframe。現在只允許 YouTube、Vimeo、Google Maps 的 https iframe；script、事件屬性（onclick / onerror 等）、javascript:、data:、以及其他網域都會被後端拒絕。</p>
+        <div class="admin-grid">
+          <div>
+            <div class="field-group">
+              <label>選擇媒體</label>
+              <select id="media_select" onchange="loadMediaItem()"></select>
+              <select id="m_kind" onchange="toggleMediaFields()">
+                <option value="image">圖片</option>
+                <option value="video">影片</option>
+                <option value="embed">嵌入內容</option>
+              </select>
+              <input id="m_title" placeholder="媒體 title / 名稱（建議填）">
+              <input id="m_caption" placeholder="caption / 這張圖或影片代表什麼（建議填）">
+              <input id="m_alt" placeholder="alt / 描述畫面主體與用途（建議填）">
+              <div class="asset-picker">
+                <input id="m_url" placeholder="媒體路徑或網址">
+                <div class="asset-picker-row">
+                  <input type="file" id="media_file" accept="image/*,video/*,.mov,.mp4,.webm,.heic,.heif">
+                  <button class="btn btn-secondary" type="button" onclick="uploadAssetToField('media_file','m_url','media_preview')">上傳並套用媒體</button>
+                </div>
+                <div class="asset-preview" id="media_preview"><span>尚未選擇媒體</span></div>
+              </div>
+              <textarea id="m_embed_code" rows="6" placeholder="如果類型是 embed，可貼 iframe 或嵌入碼"></textarea>
+            </div>
+            <div class="card-actions">
+              <button class="btn btn-secondary" onclick="newMediaItem()">新增媒體</button>
+              <button class="btn btn-secondary" onclick="saveMediaItem()">套用目前媒體</button>
+              <button class="btn btn-secondary" onclick="deleteMediaItem()">刪除目前媒體</button>
+            </div>
+          </div>
+          <div>
+            <div class="field-group">
+              <label>目前媒體清單</label>
+              <div id="media_preview_list" class="table-list"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:18px">
+        <h3>9. Schema 與 fallback 規則</h3>
+        <p class="helper">這區控制結構化資料與預設補位邏輯，讓作品頁、SEO 與分享圖在資料不完整時也能正常運作。</p>
+        <div class="admin-grid">
+          <div>
+            <div class="field-group">
+              <label>Schema</label>
+              <input id="schema_organization_type" placeholder="Organization 類型，例如 Organization">
+              <label><input id="schema_enable_breadcrumb" type="checkbox" style="width:auto"> 啟用 Breadcrumb</label>
+              <label><input id="schema_enable_video_object" type="checkbox" style="width:auto"> 啟用 VideoObject</label>
+              <label><input id="schema_enable_faq" type="checkbox" style="width:auto"> 預留 FAQ 結構</label>
+            </div>
+          </div>
+          <div>
+            <div class="field-group">
+              <label>Fallback</label>
+              <label><input id="fallback_cover_image_from_first_media" type="checkbox" style="width:auto"> 沒封面時，抓第一張媒體</label>
+              <label><input id="fallback_seo_title_from_project_title" type="checkbox" style="width:auto"> 沒作品 SEO title 時，用作品標題組</label>
+              <label><input id="fallback_seo_description_from_summary" type="checkbox" style="width:auto"> 沒作品 SEO description 時，用作品摘要</label>
+              <input id="fallback_og_image_default" placeholder="沒 OG 圖時，用這張預設圖">
+              <textarea id="fallback_summary_message_zh" rows="3" placeholder="沒摘要時的中文 fallback"></textarea>
+              <textarea id="fallback_detail_message_zh" rows="3" placeholder="沒詳細介紹時的中文 fallback"></textarea>
+              <textarea id="fallback_summary_message_en" rows="3" placeholder="沒摘要時的英文 fallback"></textarea>
+              <textarea id="fallback_detail_message_en" rows="3" placeholder="沒詳細介紹時的英文 fallback"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:18px">
+        <h3>10. 目前作品總覽</h3>
+        <div class="table-list" id="portfolio_preview"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const API='/api';
+let DATA=null;
+let DIRTY=false;
+let ADMIN_CSRF_TOKEN='';
+
+function v(id){ return document.getElementById(id); }
+function status(msg){ if(v('status')) v('status').textContent=msg; if(v('status2')) v('status2').textContent=msg; }
+function markDirty(){ DIRTY=true; status('你有尚未儲存的變更。完成後記得按「一鍵儲存全部內容」'); }
+function clearDirty(){ DIRTY=false; }
+function setAttemptsText(msg){ if(v('attempts')) v('attempts').textContent=msg; }
+function togglePassword(){ const input=v('token'); if(input) input.type=input.type==='password'?'text':'password'; }
+function normalizeFieldValue(value){
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+}
+function setValue(id, value=''){ const el=v(id); if(el) el.value=normalizeFieldValue(value); }
+function setChecked(id, value=false){ const el=v(id); if(el) el.checked=!!value; }
+function readValue(id){ return v(id)?.value?.trim?.() ?? ''; }
+
+function ensureData(){
+  if(!DATA) DATA={site:{zh:{},en:{},branding:{}},services:{zh:[],en:[]},portfolio:[],contacts:[],seo:{zh:{},en:{},default_keywords:[]},content:{zh:{},en:{}},schema:{},fallbacks:{}};
+  if(!DATA.site) DATA.site={zh:{},en:{},branding:{}};
+  if(!DATA.site.zh) DATA.site.zh={};
+  if(!DATA.site.en) DATA.site.en={};
+  if(!DATA.site.branding) DATA.site.branding={};
+  if(!DATA.services) DATA.services={zh:[],en:[]};
+  if(!DATA.portfolio) DATA.portfolio=[];
+  if(!DATA.contacts) DATA.contacts=[];
+  if(!DATA.seo) DATA.seo={zh:{},en:{},default_keywords:[]};
+  if(!DATA.seo.zh) DATA.seo.zh={};
+  if(!DATA.seo.en) DATA.seo.en={};
+  if(!Array.isArray(DATA.seo.default_keywords)) DATA.seo.default_keywords=[];
+  if(!DATA.content) DATA.content={zh:{},en:{}};
+  if(!DATA.content.zh) DATA.content.zh={};
+  if(!DATA.content.en) DATA.content.en={};
+  if(!DATA.schema) DATA.schema={};
+  if(!DATA.fallbacks) DATA.fallbacks={};
+}
+
+function ensureNested(path, fallback){
+  let ref=DATA;
+  path.forEach((key, index)=>{
+    if(ref[key]===undefined){ ref[key]= index===path.length-1 ? fallback : {}; }
+    ref=ref[key];
+  });
+  return ref;
+}
+
+function getTemplate(lang,key){ return DATA?.seo?.templates?.[lang]?.[key] || ''; }
+function setTemplate(lang,key,value){ ensureNested(['seo','templates',lang], {}); DATA.seo.templates[lang][key]=value; }
+function getContent(path, fallback=''){ let ref=DATA?.content; for(const key of path){ ref=ref?.[key]; if(ref===undefined) return fallback; } return ref ?? fallback; }
+function setContent(path, value){ const parent=ensureNested(['content', path[0], path[1]], {}); parent[path[2]]=value; }
+
+function isVideoPath(path){ return /\.(mp4|webm|mov)(\?|#|$)/i.test(String(path||'')); }
+function renderAssetPreview(previewId, path){
+  const el=v(previewId); if(!el) return;
+  const src=(path||'').trim();
+  if(!src){ el.innerHTML='<span>尚未選擇檔案</span>'; return; }
+  if(isVideoPath(src)){ el.innerHTML=`<video src="${src}" controls playsinline preload="metadata"></video>`; return; }
+  el.innerHTML=`<img src="${src}" alt="preview">`;
+}
+
+function getCurrentPortfolioIndex(){ return Number(v('portfolio_select')?.value || 0); }
+function getCurrentPortfolioItem(){ return (DATA.portfolio||[])[getCurrentPortfolioIndex()]; }
+function ensurePortfolioMedia(item){ if(!item.media) item.media=[]; return item.media; }
+
+function toggleMediaFields(){
+  const kind=v('m_kind')?.value;
+  const embed=v('m_embed_code');
+  const file=v('media_file');
+  if(embed) embed.style.display = kind==='embed' ? 'block' : 'none';
+  if(file) file.disabled = kind==='embed';
+  if(v('m_url')) v('m_url').placeholder = kind==='embed' ? '嵌入用網址（可空白）' : '媒體路徑或網址';
+}
+
+async function refreshLoginStatus(){
+  try{
+    const res=await fetch(`${API}/admin/login-status`);
+    const data=await res.json().catch(()=>({}));
+    if(res.ok) setAttemptsText(`剩餘嘗試次數：${data.remaining_attempts}`);
+    else setAttemptsText(data.detail || '目前無法取得剩餘次數');
+  }catch(e){ setAttemptsText('目前無法取得剩餘次數'); }
+}
+
+async function unlockAdmin(){
+  const token=v('token').value.trim();
+  if(!token) return status('請先輸入 token');
+  status('驗證中...');
+  try{
+    const res=await fetch(`${API}/admin/login`, {method:'POST', headers:{'X-Admin-Token': token}});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok){ status(data.detail || '密碼錯誤，無法進入後台'); await refreshLoginStatus(); return; }
+    ADMIN_CSRF_TOKEN = data.csrf_token || '';
+    v('token').value='';
+    v('adminGate').style.display='none';
+    v('adminApp').style.display='block';
+    status('驗證成功');
+    await loadSite();
+  }catch(e){ status('無法連線後端'); }
+}
+
+async function logoutAdmin(){
+  await fetch(`${API}/admin/logout`, {method:'POST', headers:{'X-CSRF-Token': ADMIN_CSRF_TOKEN}});
+  ADMIN_CSRF_TOKEN = '';
+  v('adminApp').style.display='none';
+  v('adminGate').style.display='block';
+  status('已登出');
+  await refreshLoginStatus();
+}
+
+function refreshPortfolioSelect(){
+  const el=v('portfolio_select');
+  const currentValue=el?.value || '0';
+  el.innerHTML=(DATA.portfolio||[]).map((item,i)=>`<option value="${i}">${item.zh?.title || item.id || ('item-'+i)}</option>`).join('');
+  if(el.options.length) el.value = Number(currentValue) < el.options.length ? currentValue : '0';
+  renderPortfolioPreview();
+  refreshMediaSelect();
+}
+
+function renderPortfolioPreview(){
+  v('portfolio_preview').innerHTML=(DATA.portfolio||[]).map((item,i)=>`<div class="mini-card">#${i+1} · ${item.id||''} · ${item.zh?.title||''} · ${item.category||''} · 媒體 ${item.media?.length||0} 筆 · 封面 ${item.cover_image?'已設定':'未設定'} · ${item.featured===false?'隱藏':'顯示'}</div>`).join('') || '<div class="mini-card">目前還沒有作品，請先按「新增作品」</div>';
+}
+
+function refreshMediaSelect(){
+  const item=getCurrentPortfolioItem();
+  const list=item?.media || [];
+  v('media_select').innerHTML=list.map((media,i)=>`<option value="${i}">${media.title || media.kind || ('media-'+(i+1))}</option>`).join('');
+  renderMediaPreviewList();
+}
+
+function renderMediaPreviewList(){
+  const item=getCurrentPortfolioItem();
+  const list=item?.media || [];
+  v('media_preview_list').innerHTML=list.map((media,i)=>`<div class="mini-card">#${i+1} · ${media.kind} · ${media.title||''}<br><span class="helper">${media.caption||''}</span><br><span class="helper">${media.url||'embed only'}</span></div>`).join('') || '<div class="mini-card">目前沒有媒體，請按「新增媒體」</div>';
+}
+
+function loadMediaItem(){
+  const item=getCurrentPortfolioItem();
+  if(!item) return;
+  const media=(item.media||[])[Number(v('media_select').value||0)];
+  if(!media){
+    v('m_kind').value='image'; setValue('m_title'); setValue('m_caption'); setValue('m_alt'); setValue('m_url'); setValue('m_embed_code');
+    renderAssetPreview('media_preview',''); toggleMediaFields(); return;
+  }
+  v('m_kind').value=media.kind||'image';
+  setValue('m_title', media.title||'');
+  setValue('m_caption', media.caption||'');
+  setValue('m_alt', media.alt||'');
+  setValue('m_url', media.url||'');
+  setValue('m_embed_code', media.embed_code||'');
+  renderAssetPreview('media_preview', media.url||'');
+  toggleMediaFields();
+}
+
+function newMediaItem(){
+  const item=getCurrentPortfolioItem();
+  if(!item) return status('請先新增或選擇一個作品');
+  ensurePortfolioMedia(item).push({kind:'image',url:'',title:'新媒體',caption:'',alt:'',embed_code:''});
+  refreshMediaSelect();
+  v('media_select').value=String(item.media.length-1);
+  loadMediaItem();
+  markDirty();
+}
+
+function saveMediaItem(silent=false){
+  const item=getCurrentPortfolioItem();
+  if(!item) return silent ? false : status('請先新增或選擇一個作品');
+  const list=ensurePortfolioMedia(item);
+  let idx=Number(v('media_select').value||0);
+  const existing=list[idx]||{kind:'image',title:'',caption:'',alt:'',url:'',embed_code:''};
+  if(!list.length){ list.push(existing); idx=0; }
+  const kind=v('m_kind').value||existing.kind;
+  const nextUrl=readValue('m_url')||existing.url||'';
+  const nextEmbed=readValue('m_embed_code')||existing.embed_code||'';
+  if((kind==='image' || kind==='video') && !nextUrl){ if(!silent) status(kind==='video' ? '影片媒體必須先上傳影片或填入影片網址，不能是空的' : '圖片媒體必須先上傳圖片或填入圖片網址'); return false; }
+  if(kind==='video' && !isVideoPath(nextUrl)){ if(!silent) status('你現在選的是影片，但路徑看起來不是 mp4 / webm / mov'); return false; }
+  if(kind==='embed' && !nextEmbed && !nextUrl){ if(!silent) status('Embed 媒體至少要有嵌入碼或網址'); return false; }
+  list[idx]={ kind, title:readValue('m_title')||existing.title||'', caption:readValue('m_caption')||existing.caption||'', alt:readValue('m_alt')||existing.alt||'', url:nextUrl, embed_code: kind==='embed' ? nextEmbed : '' };
+  if(!item.cover_image && list[idx].url){ item.cover_image=list[idx].url; setValue('p_cover_image', list[idx].url); renderAssetPreview('portfolio_cover_preview', list[idx].url); }
+  refreshMediaSelect();
+  v('media_select').value=String(idx);
+  loadMediaItem();
+  markDirty();
+  if(!silent) status('目前媒體已套用，記得最後按「一鍵儲存全部內容」');
+  return true;
+}
+
+function deleteMediaItem(){
+  const item=getCurrentPortfolioItem();
+  if(!item || !item.media?.length) return status('目前沒有可刪除的媒體');
+  const idx=Number(v('media_select').value||0);
+  item.media.splice(idx,1);
+  refreshMediaSelect();
+  loadMediaItem();
+  markDirty();
+}
+
+function clearPortfolioForm(){
+  ['p_id','p_category','p_cover_image','p_external_url','p_title_zh','p_title_en','p_summary_zh','p_summary_en','p_detail_zh','p_detail_en','p_tech_zh','p_tech_en','p_seo_title_zh','p_seo_description_zh','p_seo_title_en','p_seo_description_en'].forEach(id=>setValue(id,''));
+  setChecked('p_open_in_new_page', true);
+  setChecked('p_featured', true);
+  renderAssetPreview('portfolio_cover_preview','');
+  if(v('media_select')) v('media_select').innerHTML='';
+  renderMediaPreviewList();
+  setValue('m_title',''); setValue('m_caption',''); setValue('m_alt',''); setValue('m_url',''); setValue('m_embed_code','');
+  if(v('m_kind')) v('m_kind').value='image';
+  renderAssetPreview('media_preview','');
+  toggleMediaFields();
+}
+
+function loadPortfolioItem(){
+  const idx=getCurrentPortfolioIndex();
+  const item=(DATA.portfolio||[])[idx];
+  if(!item){ clearPortfolioForm(); return; }
+  setValue('p_id', item.id||'');
+  setValue('p_category', item.category||'');
+  setValue('p_cover_image', item.cover_image||'');
+  renderAssetPreview('portfolio_cover_preview', item.cover_image||'');
+  setValue('p_external_url', item.external_url||'');
+  setChecked('p_open_in_new_page', !!item.open_in_new_page);
+  setChecked('p_featured', !!item.featured);
+  setValue('p_title_zh', item.zh?.title||'');
+  setValue('p_title_en', item.en?.title||'');
+  setValue('p_summary_zh', item.zh?.summary||'');
+  setValue('p_summary_en', item.en?.summary||'');
+  setValue('p_detail_zh', item.zh?.detail||'');
+  setValue('p_detail_en', item.en?.detail||'');
+  setValue('p_tech_zh', (item.zh?.tech_stack||[]).join(', '));
+  setValue('p_tech_en', (item.en?.tech_stack||[]).join(', '));
+  setValue('p_seo_title_zh', item.zh?.seo_title||'');
+  setValue('p_seo_description_zh', item.zh?.seo_description||'');
+  setValue('p_seo_title_en', item.en?.seo_title||'');
+  setValue('p_seo_description_en', item.en?.seo_description||'');
+  refreshMediaSelect();
+  loadMediaItem();
+}
+
+function newPortfolioItem(){
+  ensureData();
+  const count=(DATA.portfolio||[]).length+1;
+  DATA.portfolio.push({
+    id:`project-${count}`,
+    category:'General',
+    cover_image:'',
+    external_url:'',
+    open_in_new_page:true,
+    featured:true,
+    zh:{title:`新作品 ${count}`,summary:'',detail:'',tech_stack:[],seo_title:'',seo_description:''},
+    en:{title:`New Project ${count}`,summary:'',detail:'',tech_stack:[],seo_title:'',seo_description:''},
+    media:[]
+  });
+  refreshPortfolioSelect();
+  v('portfolio_select').value=String(DATA.portfolio.length-1);
+  loadPortfolioItem();
+  markDirty();
+}
+
+function savePortfolioItem(){
+  ensureData();
+  let idx=getCurrentPortfolioIndex();
+  if(idx < 0 || Number.isNaN(idx)) idx = 0;
+  const existing=DATA.portfolio[idx]||{media:[],zh:{tech_stack:[]},en:{tech_stack:[]}};
+  const currentMedia=existing.media||[];
+  const safeText=(next,current)=>{ const value=String(next??''); return value!=='' ? value : (current||''); };
+  const cover=readValue('p_cover_image') || existing.cover_image || currentMedia.find(m=>m.url)?.url || '';
+  DATA.portfolio[idx]={
+    id:readValue('p_id') || existing.id || `project-${idx+1}`,
+    category:readValue('p_category') || existing.category || 'General',
+    cover_image:cover,
+    external_url:readValue('p_external_url') || existing.external_url || '',
+    open_in_new_page:v('p_open_in_new_page').checked,
+    featured:v('p_featured').checked,
+    media:currentMedia,
+    zh:{
+      title:safeText(v('p_title_zh').value, existing.zh?.title),
+      summary:safeText(v('p_summary_zh').value, existing.zh?.summary),
+      detail:safeText(v('p_detail_zh').value, existing.zh?.detail),
+      tech_stack:v('p_tech_zh').value.split(',').map(x=>x.trim()).filter(Boolean),
+      seo_title:safeText(v('p_seo_title_zh').value, existing.zh?.seo_title),
+      seo_description:safeText(v('p_seo_description_zh').value, existing.zh?.seo_description)
+    },
+    en:{
+      title:safeText(v('p_title_en').value, existing.en?.title),
+      summary:safeText(v('p_summary_en').value, existing.en?.summary),
+      detail:safeText(v('p_detail_en').value, existing.en?.detail),
+      tech_stack:v('p_tech_en').value.split(',').map(x=>x.trim()).filter(Boolean),
+      seo_title:safeText(v('p_seo_title_en').value, existing.en?.seo_title),
+      seo_description:safeText(v('p_seo_description_en').value, existing.en?.seo_description)
+    }
+  };
+  setValue('p_cover_image', cover);
+  renderAssetPreview('portfolio_cover_preview', cover);
+  refreshPortfolioSelect();
+  v('portfolio_select').value=String(idx);
+  refreshMediaSelect();
+  loadPortfolioItem();
+  markDirty();
+}
+
+function deletePortfolioItem(){
+  const idx=getCurrentPortfolioIndex();
+  if(!DATA.portfolio.length) return status('目前沒有可刪除的作品');
+  DATA.portfolio.splice(idx,1);
+  refreshPortfolioSelect();
+  if(DATA.portfolio.length){
+    v('portfolio_select').value='0';
+    loadPortfolioItem();
+  } else {
+    clearPortfolioForm();
+  }
+  markDirty();
+  status('作品已從目前資料中刪除，請再按「一鍵儲存全部內容」才會正式寫入');
+}
+
+function repairCorruptedData(){
+  ensureData();
+}
+
+function fillSiteFields(){
+  const zh=DATA.site?.zh||{}; const en=DATA.site?.en||{}; const branding=DATA.site?.branding||{};
+  ['studio_name','english_name','tagline','hero_title','hero_subtitle','about_title','about_content','contact_title','contact_note'].forEach(key=>{
+    setValue(`${key}_zh`, zh[key]||'');
+    setValue(`${key}_en`, en[key]||'');
+  });
+  setValue('branding_logo_path', branding.logo_path||'');
+  setValue('branding_hero_image_path', branding.hero_image_path||'');
+  renderAssetPreview('branding_logo_preview', branding.logo_path||'');
+  renderAssetPreview('branding_hero_preview', branding.hero_image_path||'');
+}
+
+function collectSiteFields(){
+  ensureData();
+  DATA.site.zh={...(DATA.site.zh||{}), studio_name:readValue('studio_name_zh'), english_name:readValue('english_name_zh'), tagline:readValue('tagline_zh'), hero_title:readValue('hero_title_zh'), hero_subtitle:readValue('hero_subtitle_zh'), about_title:readValue('about_title_zh'), about_content:readValue('about_content_zh'), contact_title:readValue('contact_title_zh'), contact_note:readValue('contact_note_zh')};
+  DATA.site.en={...(DATA.site.en||{}), studio_name:readValue('studio_name_en'), english_name:readValue('english_name_en'), tagline:readValue('tagline_en'), hero_title:readValue('hero_title_en'), hero_subtitle:readValue('hero_subtitle_en'), about_title:readValue('about_title_en'), about_content:readValue('about_content_en'), contact_title:readValue('contact_title_en'), contact_note:readValue('contact_note_en')};
+  DATA.site.branding={...(DATA.site.branding||{}), logo_path:readValue('branding_logo_path'), hero_image_path:readValue('branding_hero_image_path')};
+}
+
+function defaultContacts(){ return [{label:'LINE', url:''},{label:'Facebook', url:''},{label:'Instagram', url:''},{label:'Email', url:''}]; }
+function normalizeContactsForEditor(){ const existing=Array.isArray(DATA.contacts)?DATA.contacts:[]; const map=new Map(existing.map(item=>[String(item.label||'').trim(), item])); const base=defaultContacts().map(item=>map.get(item.label) || item); const customs=existing.filter(item=>!['LINE','Facebook','Instagram','Email'].includes(String(item.label||'').trim())); DATA.contacts=[...base, ...customs]; }
+function escapeHtml(value){ return String(value||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function renderContactsEditor(){ normalizeContactsForEditor(); const wrap=v('contacts_list'); wrap.innerHTML=(DATA.contacts||[]).map((item, index)=>{ const locked=['LINE','Facebook','Instagram','Email'].includes(item.label||''); return `<div class="mini-card"><div class="field-group"><input data-contact-label="${index}" placeholder="名稱，例如 LINE / GitHub" value="${escapeHtml(item.label||'')}" ${locked?'readonly':''}><input data-contact-url="${index}" placeholder="連結或 mailto:" value="${escapeHtml(item.url||'')}"></div>${locked?'':`<div class="card-actions"><button class="btn btn-secondary" type="button" onclick="removeContactRow(${index})">刪除這筆連結</button></div>`}</div>`; }).join(''); wrap.querySelectorAll('input').forEach(input=>input.addEventListener('input', ()=>markDirty())); }
+function addContactRow(label='', url=''){ ensureData(); if(!Array.isArray(DATA.contacts)) DATA.contacts=[]; DATA.contacts.push({label, url}); renderContactsEditor(); markDirty(); }
+function removeContactRow(index){ ensureData(); DATA.contacts.splice(index,1); renderContactsEditor(); markDirty(); }
+function collectContactsFields(){ ensureData(); const labels=[...document.querySelectorAll('[data-contact-label]')]; DATA.contacts=labels.map(input=>{ const index=input.getAttribute('data-contact-label'); const urlInput=document.querySelector(`[data-contact-url="${index}"]`); return { label: input.value.trim(), url: urlInput ? urlInput.value.trim() : '' }; }).filter(item=>item.label && item.url); }
+
+function ensureServices(){ ensureData(); if(!Array.isArray(DATA.services.zh)) DATA.services.zh=[]; if(!Array.isArray(DATA.services.en)) DATA.services.en=[]; }
+function renderServicesEditor(){ ensureServices(); ['zh','en'].forEach(lang=>{ const wrap=v(`services_${lang}_list`); if(!wrap) return; const items=DATA.services[lang]||[]; wrap.innerHTML=items.map((item,index)=>`<div class="service-admin-item"><div class="field-group"><label>${lang==='zh' ? `服務 ${index+1}` : `Service ${index+1}`}</label><input data-service-lang="${lang}" data-service-title="${index}" placeholder="服務標題" value="${escapeHtml(item.title||'')}"><textarea data-service-lang="${lang}" data-service-description="${index}" rows="4" placeholder="服務描述">${escapeHtml(item.description||'')}</textarea></div><div class="card-actions"><button class="btn btn-secondary" type="button" onclick="moveServiceItem('${lang}', ${index}, -1)">上移</button><button class="btn btn-secondary" type="button" onclick="moveServiceItem('${lang}', ${index}, 1)">下移</button><button class="btn btn-secondary" type="button" onclick="removeServiceItem('${lang}', ${index})">刪除</button></div></div>`).join('') || '<div class="mini-card">目前沒有服務項目，請新增。</div>'; wrap.querySelectorAll('input, textarea').forEach(input=>input.addEventListener('input', ()=>markDirty())); }); }
+function defaultServiceSeed(lang){ if(lang==='zh') return [{title:'AI 串接與智慧客服',description:'整合客服、表單、CRM、知識庫與內部系統，讓 AI 成為真正的營運能力。'},{title:'客製化 AI / RAG / Agent',description:'打造企業專屬 AI、知識問答系統、AI Agent 與內部工具。'},{title:'網站與系統開發',description:'提供品牌官網、前後端分離網站、後台系統、API 與商業平台建置。'},{title:'自動化整合',description:'串接跨服務流程，減少人工重複操作，強化營運效率。'},{title:'資安檢查',description:'針對網站、系統、資料流與權限結構進行安全檢視與改善建議。'},{title:'商業研究 / SEO / 技術顧問',description:'從市場調研到 SEO 與技術規劃，提供可執行的商業與技術建議。'}]; return [{title:'AI Integration & Smart Support',description:'Connect AI with support, forms, CRM, knowledge bases, and internal systems.'},{title:'Custom AI / RAG / Agents',description:'Build tailored AI assistants, knowledge systems, RAG tools, and AI agents.'},{title:'Web & System Development',description:'Deliver websites, admin systems, APIs, and business platforms with separated frontend and backend.'},{title:'Automation & Workflow Integration',description:'Connect services and automate repetitive operational tasks.'},{title:'Security Review',description:'Assess websites, systems, data flows, and access structures from a security perspective.'},{title:'Research / SEO / Technical Consulting',description:'Support market research, SEO planning, and technical strategy.'}]; }
+function seedDefaultServices(lang){ ensureServices(); DATA.services[lang]=defaultServiceSeed(lang); renderServicesEditor(); markDirty(); }
+function addServiceItem(lang){ ensureServices(); DATA.services[lang].push({title: lang==='zh' ? '新服務' : 'New Service', description:''}); renderServicesEditor(); markDirty(); }
+async function translateServiceText(text){
+  const res = await fetch(`${API}/admin/translate-service`, {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token': ADMIN_CSRF_TOKEN}, body:JSON.stringify({text})});
+  const data = await res.json().catch(()=>({}));
+  return data.text || text || '';
+}
+async function translateAllServicesToEnglish(){
+  ensureServices();
+  collectServicesFields();
+  const zhList = DATA.services.zh || [];
+  const next = [];
+  status('服務英文翻譯中...');
+  for (const item of zhList){
+    const title = await translateServiceText(item.title || '');
+    const description = await translateServiceText(item.description || '');
+    next.push({title, description});
+  }
+  DATA.services.en = next;
+  renderServicesEditor();
+  markDirty();
+  status('已依中文服務自動更新英文服務，最後記得按「一鍵儲存全部內容」');
+}
+function moveServiceItem(lang, index, direction){ ensureServices(); const list=DATA.services[lang]; const next=index+direction; if(next<0 || next>=list.length) return; [list[index], list[next]]=[list[next], list[index]]; renderServicesEditor(); markDirty(); }
+function removeServiceItem(lang, index){ ensureServices(); DATA.services[lang].splice(index,1); renderServicesEditor(); markDirty(); }
+function collectServicesFields(){ ensureServices(); ['zh','en'].forEach(lang=>{ const titleNodes=[...document.querySelectorAll(`[data-service-lang="${lang}"][data-service-title]`)]; DATA.services[lang]=titleNodes.map(node=>{ const index=node.getAttribute('data-service-title'); const desc=document.querySelector(`[data-service-lang="${lang}"][data-service-description="${index}"]`); return {title: node.value.trim(), description: desc ? desc.value.trim() : ''}; }).filter(item=>item.title || item.description); }); }
+
+function fillSeoFields(){
+  const seo=DATA.seo||{}; const zh=seo.zh||{}; const en=seo.en||{};
+  setValue('seo_site_url', seo.site_url||''); setValue('seo_site_name', seo.site_name||''); setValue('seo_default_title', seo.default_title||''); setValue('seo_default_description', seo.default_description||''); setValue('seo_title_template', seo.title_template||'%s | CLM Studio'); setValue('seo_default_keywords', (seo.default_keywords||[]).join(', ')); setValue('seo_robots', seo.robots||'index, follow, max-image-preview:large'); setValue('seo_twitter_card', seo.twitter_card||'summary_large_image');
+  const og=(zh.default_og_image)||(en.default_og_image)||''; setValue('seo_default_og_image', og); renderAssetPreview('seo_og_preview', og);
+  setValue('seo_home_title_zh', zh.home_title||''); setValue('seo_home_description_zh', zh.home_description||''); setValue('seo_about_title_zh', zh.about_title||''); setValue('seo_about_description_zh', zh.about_description||''); setValue('seo_services_title_zh', zh.services_title||''); setValue('seo_services_description_zh', zh.services_description||''); setValue('seo_portfolio_title_zh', zh.portfolio_title||''); setValue('seo_portfolio_description_zh', zh.portfolio_description||''); setValue('seo_contact_title_zh', zh.contact_title||''); setValue('seo_contact_description_zh', zh.contact_description||'');
+  setValue('seo_home_title_en', en.home_title||''); setValue('seo_home_description_en', en.home_description||''); setValue('seo_about_title_en', en.about_title||''); setValue('seo_about_description_en', en.about_description||''); setValue('seo_services_title_en', en.services_title||''); setValue('seo_services_description_en', en.services_description||''); setValue('seo_portfolio_title_en', en.portfolio_title||''); setValue('seo_portfolio_description_en', en.portfolio_description||''); setValue('seo_contact_title_en', en.contact_title||''); setValue('seo_contact_description_en', en.contact_description||'');
+}
+function collectSeoFields(){
+  ensureData(); if(!DATA.seo) DATA.seo={zh:{},en:{},default_keywords:[]}; const og=readValue('seo_default_og_image');
+  DATA.seo.site_url=readValue('seo_site_url'); DATA.seo.site_name=readValue('seo_site_name'); DATA.seo.default_title=readValue('seo_default_title'); DATA.seo.default_description=readValue('seo_default_description'); DATA.seo.title_template=readValue('seo_title_template') || '%s | CLM Studio'; DATA.seo.default_keywords=readValue('seo_default_keywords').split(',').map(x=>x.trim()).filter(Boolean); DATA.seo.robots=readValue('seo_robots') || 'index, follow, max-image-preview:large'; DATA.seo.twitter_card=readValue('seo_twitter_card') || 'summary_large_image';
+  DATA.seo.zh={...(DATA.seo.zh||{}), home_title:readValue('seo_home_title_zh'), home_description:readValue('seo_home_description_zh'), about_title:readValue('seo_about_title_zh'), about_description:readValue('seo_about_description_zh'), services_title:readValue('seo_services_title_zh'), services_description:readValue('seo_services_description_zh'), portfolio_title:readValue('seo_portfolio_title_zh'), portfolio_description:readValue('seo_portfolio_description_zh'), contact_title:readValue('seo_contact_title_zh'), contact_description:readValue('seo_contact_description_zh'), default_og_image:og };
+  DATA.seo.en={...(DATA.seo.en||{}), home_title:readValue('seo_home_title_en'), home_description:readValue('seo_home_description_en'), about_title:readValue('seo_about_title_en'), about_description:readValue('seo_about_description_en'), services_title:readValue('seo_services_title_en'), services_description:readValue('seo_services_description_en'), portfolio_title:readValue('seo_portfolio_title_en'), portfolio_description:readValue('seo_portfolio_description_en'), contact_title:readValue('seo_contact_title_en'), contact_description:readValue('seo_contact_description_en'), default_og_image:og };
+}
+
+function fillTemplateFields(){
+  const keys=['home_title','home_description','about_title','about_description','services_title','services_description','portfolio_title','portfolio_description','contact_title','contact_description','project_title','project_summary','project_detail','project_tech_stack','project_seo_title','project_seo_description','media_alt','media_title','media_caption','image_format','video_format','embed_format'];
+  ['zh','en'].forEach(lang=> keys.forEach(key=> setValue(`template_${key}_${lang}`, getTemplate(lang, key))));
+}
+function collectTemplateFields(){
+  const keys=['home_title','home_description','about_title','about_description','services_title','services_description','portfolio_title','portfolio_description','contact_title','contact_description','project_title','project_summary','project_detail','project_tech_stack','project_seo_title','project_seo_description','media_alt','media_title','media_caption','image_format','video_format','embed_format'];
+  ['zh','en'].forEach(lang=> keys.forEach(key=> setTemplate(lang, key, readValue(`template_${key}_${lang}`))));
+}
+
+function fillContentFields(){
+  const h=['section_tag','headline','description','services_cta_title','services_cta_description','consultation_title','consultation_description'];
+  ['zh','en'].forEach(lang=>{
+    h.forEach(key=> setValue(`content_home_${key}_${lang}`, getContent([lang,'home',key], '')));
+    [1,2,3].forEach(i=>{ const item=getContent([lang,'home','highlights'], [])[i-1] || {}; setValue(`content_home_highlight_${i}_title_${lang}`, item.title||''); setValue(`content_home_highlight_${i}_description_${lang}`, item.description||''); });
+    setValue(`content_about_work_title_${lang}`, getContent([lang,'about','work_title'], ''));
+    setValue(`content_about_work_description_${lang}`, getContent([lang,'about','work_description'], ''));
+    setValue(`content_services_intro_${lang}`, getContent([lang,'services','intro'], ''));
+    setValue(`content_services_cta_title_${lang}`, getContent([lang,'services','cta_title'], ''));
+    setValue(`content_services_cta_description_${lang}`, getContent([lang,'services','cta_description'], ''));
+    setValue(`content_portfolio_intro_${lang}`, getContent([lang,'portfolio','intro'], ''));
+    setValue(`content_contact_project_title_${lang}`, getContent([lang,'contact','project_title'], ''));
+    setValue(`content_contact_project_description_${lang}`, getContent([lang,'contact','project_description'], ''));
+    setValue(`content_contact_project_helper_${lang}`, getContent([lang,'contact','project_helper'], ''));
+    setValue(`content_contact_consultation_title_${lang}`, getContent([lang,'contact','consultation_title'], ''));
+    setValue(`content_contact_consultation_description_${lang}`, getContent([lang,'contact','consultation_description'], ''));
+    setValue(`content_contact_consultation_helper_${lang}`, getContent([lang,'contact','consultation_helper'], ''));
+  });
+}
+function collectContentFields(){
+  ['zh','en'].forEach(lang=>{
+    ensureNested(['content',lang,'home'], {}); ensureNested(['content',lang,'about'], {}); ensureNested(['content',lang,'services'], {}); ensureNested(['content',lang,'portfolio'], {}); ensureNested(['content',lang,'contact'], {});
+    DATA.content[lang].home={...(DATA.content[lang].home||{}), section_tag:readValue(`content_home_section_tag_${lang}`), headline:readValue(`content_home_headline_${lang}`), description:readValue(`content_home_description_${lang}`), services_cta_title:readValue(`content_home_services_cta_title_${lang}`), services_cta_description:readValue(`content_home_services_cta_description_${lang}`), consultation_title:readValue(`content_home_consultation_title_${lang}`), consultation_description:readValue(`content_home_consultation_description_${lang}`), highlights:[1,2,3].map(i=>({title:readValue(`content_home_highlight_${i}_title_${lang}`), description:readValue(`content_home_highlight_${i}_description_${lang}`)})).filter(item=>item.title || item.description)};
+    DATA.content[lang].about={...(DATA.content[lang].about||{}), work_title:readValue(`content_about_work_title_${lang}`), work_description:readValue(`content_about_work_description_${lang}`), points:DATA.content[lang].about?.points||[], cards:DATA.content[lang].about?.cards||[]};
+    DATA.content[lang].services={...(DATA.content[lang].services||{}), intro:readValue(`content_services_intro_${lang}`), cta_title:readValue(`content_services_cta_title_${lang}`), cta_description:readValue(`content_services_cta_description_${lang}`)};
+    DATA.content[lang].portfolio={...(DATA.content[lang].portfolio||{}), intro:readValue(`content_portfolio_intro_${lang}`)};
+    DATA.content[lang].contact={...(DATA.content[lang].contact||{}), cards:DATA.content[lang].contact?.cards||[], project_title:readValue(`content_contact_project_title_${lang}`), project_description:readValue(`content_contact_project_description_${lang}`), project_helper:readValue(`content_contact_project_helper_${lang}`), consultation_title:readValue(`content_contact_consultation_title_${lang}`), consultation_description:readValue(`content_contact_consultation_description_${lang}`), consultation_helper:readValue(`content_contact_consultation_helper_${lang}`)};
+  });
+}
+
+function fillSchemaFallbackFields(){
+  const schema=DATA.schema||{}; const fallbacks=DATA.fallbacks||{};
+  setValue('schema_organization_type', schema.organization_type||'Organization'); setChecked('schema_enable_breadcrumb', schema.enable_breadcrumb!==false); setChecked('schema_enable_video_object', schema.enable_video_object!==false); setChecked('schema_enable_faq', !!schema.enable_faq);
+  setChecked('fallback_cover_image_from_first_media', fallbacks.cover_image_from_first_media!==false); setChecked('fallback_seo_title_from_project_title', fallbacks.seo_title_from_project_title!==false); setChecked('fallback_seo_description_from_summary', fallbacks.seo_description_from_summary!==false); setValue('fallback_og_image_default', fallbacks.og_image_default||''); setValue('fallback_summary_message_zh', fallbacks.summary_message_zh||''); setValue('fallback_detail_message_zh', fallbacks.detail_message_zh||''); setValue('fallback_summary_message_en', fallbacks.summary_message_en||''); setValue('fallback_detail_message_en', fallbacks.detail_message_en||'');
+}
+function collectSchemaFallbackFields(){
+  DATA.schema={ organization_type:readValue('schema_organization_type') || 'Organization', enable_breadcrumb:v('schema_enable_breadcrumb').checked, enable_video_object:v('schema_enable_video_object').checked, enable_faq:v('schema_enable_faq').checked };
+  DATA.fallbacks={ cover_image_from_first_media:v('fallback_cover_image_from_first_media').checked, summary_message_zh:readValue('fallback_summary_message_zh'), summary_message_en:readValue('fallback_summary_message_en'), detail_message_zh:readValue('fallback_detail_message_zh'), detail_message_en:readValue('fallback_detail_message_en'), seo_title_from_project_title:v('fallback_seo_title_from_project_title').checked, seo_description_from_summary:v('fallback_seo_description_from_summary').checked, og_image_default:readValue('fallback_og_image_default') };
+}
+
+async function loadSite(){
+  const verify = await fetch(`${API}/admin/verify`);
+  if(verify.ok){
+    const verifyData = await verify.json().catch(()=>({}));
+    ADMIN_CSRF_TOKEN = verifyData.csrf_token || ADMIN_CSRF_TOKEN;
+  }
+  const r=await fetch(`${API}/site`); DATA=await r.json(); clearDirty(); ensureData(); repairCorruptedData();
+  fillSiteFields(); renderContactsEditor(); renderServicesEditor(); fillSeoFields(); fillTemplateFields(); fillContentFields(); fillSchemaFallbackFields();
+  refreshPortfolioSelect(); if(DATA.portfolio.length){ v('portfolio_select').value='0'; loadPortfolioItem(); }
+  toggleMediaFields(); status('載入成功');
+}
+
+function syncCurrentPortfolioIntoData(){
+  const select=v('portfolio_select');
+  if(!select || !select.options.length) return;
+  const idx = Number(select.value || 0);
+  if(!DATA.portfolio || !DATA.portfolio[idx]) return;
+  savePortfolioItem();
+}
+
+function persistCurrentMediaIntoPortfolio(){
+  const item = getCurrentPortfolioItem();
+  if(!item) return true;
+  const hasAnyMediaField = readValue('m_url') || readValue('m_embed_code') || readValue('m_title') || readValue('m_caption') || readValue('m_alt');
+  if(!hasAnyMediaField) return true;
+  return saveMediaItem(true);
+}
+
+function stringifyErrorDetail(detail){
+  if (detail === null || detail === undefined) return '儲存失敗';
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) return detail.map(item => stringifyErrorDetail(item)).join(' | ');
+  if (typeof detail === 'object') {
+    if (detail.msg) return detail.msg;
+    try { return JSON.stringify(detail, null, 2); } catch { return String(detail); }
+  }
+  return String(detail);
+}
+
+async function saveAll(){
+  ensureData();
+  collectSiteFields();
+  collectContactsFields();
+  collectServicesFields();
+  const mediaOk = persistCurrentMediaIntoPortfolio();
+  if(mediaOk === false) return;
+  syncCurrentPortfolioIntoData();
+  collectSeoFields();
+  collectTemplateFields();
+  collectContentFields();
+  collectSchemaFallbackFields();
+  const r=await fetch(`${API}/admin/site`, {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token': ADMIN_CSRF_TOKEN}, body:JSON.stringify(DATA)});
+  const d=await r.json().catch(()=>({}));
+  if(r.ok){
+    clearDirty();
+    status('儲存成功，前台、SEO、模板與 fallback 設定已更新');
+    await loadSite();
+  } else status(stringifyErrorDetail(d.detail || d || '儲存失敗'));
+}
+
+async function uploadFile(file){ const fd=new FormData(); fd.append('file', file); const r=await fetch(`${API}/admin/upload`, {method:'POST', headers:{'X-CSRF-Token': ADMIN_CSRF_TOKEN}, body:fd}); return r.json(); }
+async function uploadAssetToField(fileInputId, targetInputId, previewId){
+  const input=v(fileInputId); const file=input?.files?.[0]; if(!file) return alert('請先選擇檔案'); status('上傳中...');
+  const d=await uploadFile(file); if(!d.ok){ status(d.detail || '上傳失敗'); return; }
+  v(targetInputId).value=d.path;
+  if(targetInputId==='m_url'){
+    const mediaKind = isVideoPath(d.path) ? 'video' : 'image'; if(v('m_kind')) v('m_kind').value = mediaKind;
+    const item=getCurrentPortfolioItem();
+    if(item){ const list=ensurePortfolioMedia(item); let idx=Number(v('media_select')?.value||0); if(!list.length){ list.push({kind:mediaKind,url:d.path,title:'新媒體',caption:'',alt:'',embed_code:''}); idx=0; } else { const existing=list[idx]||{title:'新媒體',caption:'',alt:'',embed_code:''}; list[idx]={ ...existing, kind: mediaKind, url: d.path, embed_code: mediaKind==='video' ? '' : (existing.embed_code||'') }; } refreshMediaSelect(); v('media_select').value=String(idx); loadMediaItem(); }
+  }
+  if(d.converted && d.source_ext==='.mov' && d.target_ext==='.mp4'){ status(`MOV 已轉成 MP4：${d.path}`); }
+  renderAssetPreview(previewId, d.path); toggleMediaFields(); if(input) input.value=''; markDirty(); status(`已上傳並套用：${d.path}，最後記得按「一鍵儲存全部內容」`);
+}
+
+window.addEventListener('beforeunload', e=>{ if(DIRTY){ e.preventDefault(); e.returnValue=''; } });
+refreshLoginStatus();
+</script>
+</body>
+</html>
