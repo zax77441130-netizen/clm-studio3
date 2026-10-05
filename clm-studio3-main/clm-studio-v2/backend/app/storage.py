@@ -396,30 +396,66 @@ def repair_known_corruption(data):
     return data
 
 
+def _load_existing():
+    # Never replace unreadable or invalid user content with defaults.
+    current = json.loads(SITE_FILE.read_text(encoding='utf-8'))
+    if not isinstance(current, dict):
+        raise ValueError('site.json must contain a JSON object')
+    return current
+
+
 def ensure_data():
-    if not SITE_FILE.exists():
-        SITE_FILE.write_text(json.dumps(normalize_data(DEFAULT_DATA), ensure_ascii=False, indent=2), encoding='utf-8')
+    if SITE_FILE.exists():
+        _load_existing()
         return
+    # Exclusive creation prevents overwriting a file another worker created.
+    payload = json.dumps(normalize_data(DEFAULT_DATA), ensure_ascii=False, indent=2)
     try:
-        current = json.loads(SITE_FILE.read_text(encoding='utf-8'))
-    except Exception:
-        current = {}
-    normalized = repair_known_corruption(normalize_data(current))
-    SITE_FILE.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding='utf-8')
+        with SITE_FILE.open('x', encoding='utf-8') as stream:
+            stream.write(payload)
+    except FileExistsError:
+        _load_existing()
 
 
 def read_data():
     ensure_data()
-    try:
-        return json.loads(SITE_FILE.read_text(encoding='utf-8'))
-    except Exception:
-        normalized = repair_known_corruption(normalize_data(DEFAULT_DATA))
-        SITE_FILE.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding='utf-8')
-        return normalized
+    return repair_known_corruption(normalize_data(_load_existing()))
 
 
 def write_data(data):
+    import os
+    import tempfile
+    from datetime import datetime, timezone
+    from uuid import uuid4
+
+    if not isinstance(data, dict):
+        raise ValueError('Site data must be a JSON object')
     normalized = repair_known_corruption(normalize_data(data))
-    temp_file = SITE_FILE.with_suffix('.tmp')
-    temp_file.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding='utf-8')
-    temp_file.replace(SITE_FILE)
+    payload = json.dumps(normalized, ensure_ascii=False, indent=2)
+    if SITE_FILE.exists():
+        # Validate before saving; retain the exact previous bytes for recovery.
+        previous = SITE_FILE.read_bytes()
+        parsed = json.loads(previous)
+        if not isinstance(parsed, dict):
+            raise ValueError('Existing site.json must contain a JSON object')
+        backup_dir = SITE_FILE.parent / 'backups'
+        backup_dir.mkdir(exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+        backup = backup_dir / f'site-{stamp}-{uuid4().hex}.json'
+        with backup.open('xb') as stream:
+            stream.write(previous)
+            stream.flush()
+            os.fsync(stream.fileno())
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8',
+                                        dir=SITE_FILE.parent, prefix='.site-',
+                                        suffix='.tmp', delete=False) as stream:
+            temp_path = stream.name
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_path, SITE_FILE)
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.unlink(temp_path)
