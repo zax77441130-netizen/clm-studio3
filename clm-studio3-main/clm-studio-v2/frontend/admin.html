@@ -41,6 +41,8 @@
         <div class="card-actions">
           <button class="btn btn-secondary" onclick="loadSite()">重新載入目前資料</button>
           <button class="btn btn-primary" onclick="saveAll()">一鍵儲存全部內容</button>
+          <button class="btn btn-secondary" type="button" onclick="downloadBackup()">下載完整備份</button>
+          <label class="btn btn-secondary" style="cursor:pointer">還原完整備份<input id="restore_backup_file" type="file" accept=".zip,application/zip" hidden onchange="restoreBackup(this)"></label>
           <button class="btn btn-secondary" onclick="logoutAdmin()">登出</button>
           <a class="btn btn-secondary" href="/seo-check" target="_blank" rel="noopener noreferrer">打開 SEO 檢查頁</a>
         </div>
@@ -932,7 +934,10 @@ async function loadSite(){
     const verifyData = await verify.json().catch(()=>({}));
     ADMIN_CSRF_TOKEN = verifyData.csrf_token || ADMIN_CSRF_TOKEN;
   }
-  const r=await fetch(`${API}/site`); DATA=await r.json(); clearDirty(); ensureData(); repairCorruptedData();
+  const r=await fetch(`${API}/site`);
+  const loaded=await r.json().catch(()=>({}));
+  if(!r.ok){ status(stringifyErrorDetail(loaded.detail || '網站資料載入失敗')); return; }
+  DATA=loaded; clearDirty(); ensureData(); repairCorruptedData();
   fillSiteFields(); renderContactsEditor(); renderServicesEditor(); fillSeoFields(); fillTemplateFields(); fillContentFields(); fillSchemaFallbackFields();
   refreshPortfolioSelect(); if(DATA.portfolio.length){ v('portfolio_select').value='0'; loadPortfolioItem(); }
   toggleMediaFields(); status('載入成功');
@@ -980,10 +985,32 @@ async function saveAll(){
   const r=await fetch(`${API}/admin/site`, {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token': ADMIN_CSRF_TOKEN}, body:JSON.stringify(DATA)});
   const d=await r.json().catch(()=>({}));
   if(r.ok){
+    DATA._version=d.version || DATA._version;
     clearDirty();
     status('儲存成功，前台、SEO、模板與 fallback 設定已更新');
     await loadSite();
+  } else if(r.status===409){
+    markDirty();
+    status('儲存衝突：其他管理者已更新資料。你的未儲存內容仍保留；請先另行備份內容，再重新載入最新版本合併。');
   } else status(stringifyErrorDetail(d.detail || d || '儲存失敗'));
+}
+
+function downloadBackup(){
+  window.location.href=`${API}/admin/backup`;
+}
+
+async function restoreBackup(input){
+  const file=input?.files?.[0];
+  if(!file) return;
+  if(!confirm('還原會以備份內容取代目前網站資料與媒體。系統會先備份現況，確定繼續嗎？')){ input.value=''; return; }
+  const form=new FormData(); form.append('file', file);
+  status('正在驗證並還原備份...');
+  const r=await fetch(`${API}/admin/restore`, {method:'POST', headers:{'X-CSRF-Token':ADMIN_CSRF_TOKEN}, body:form});
+  const d=await r.json().catch(()=>({}));
+  input.value='';
+  if(!r.ok){ status(stringifyErrorDetail(d.detail || '還原失敗，目前資料未變更')); return; }
+  status('還原成功，正在重新載入資料');
+  await loadSite();
 }
 
 async function uploadFile(file){ const fd=new FormData(); fd.append('file', file); const r=await fetch(`${API}/admin/upload`, {method:'POST', headers:{'X-CSRF-Token': ADMIN_CSRF_TOKEN}, body:fd}); return r.json(); }

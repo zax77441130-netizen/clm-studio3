@@ -157,6 +157,13 @@ ENV/
 env.bak/
 venv.bak/
 
+# Runtime data safety artifacts (never commit production backups)
+**/data/.site-backups/
+**/data/.restore-backups/
+**/data/.site.lock
+**/data/.site-*.tmp
+**/data/.restore-*/
+
 # Spyder project settings
 .spyderproject
 .spyproject

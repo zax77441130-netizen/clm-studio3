@@ -1,16 +1,31 @@
 from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
+import os
 import re
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from urllib.parse import urlparse
 from fastapi import APIRouter, Header, HTTPException, UploadFile, File, Request, Response
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel, ValidationError
 from PIL import Image, ImageSequence
 from .config import settings, UPLOADS_DIR
-from .storage import read_data, write_data, ensure_data
+from .storage import (
+    DataCorruptError,
+    DataMissingError,
+    DataValidationError,
+    StorageError,
+    VersionConflictError,
+    create_full_backup,
+    read_data_with_version,
+    restore_full_backup,
+    with_storage_lock,
+    write_data,
+)
 from .schemas import SitePayload
 from .security import (
     enforce_rate_limit,
@@ -32,7 +47,7 @@ except Exception:
     HEIF_ENABLED = False
 
 router = APIRouter()
-ensure_data()
+MAX_BACKUP_UPLOAD_SIZE = 1024 * 1024 * 1024
 
 
 class TranslatePayload(BaseModel):
@@ -95,7 +110,12 @@ def health():
 
 @router.get('/site')
 def site():
-    return read_data()
+    try:
+        data, version = read_data_with_version()
+    except (DataMissingError, DataCorruptError, DataValidationError, StorageError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    data['_version'] = version
+    return data
 
 
 @router.get('/admin/login-status')
@@ -141,13 +161,66 @@ async def save_site(request: Request):
         raw_payload = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail='invalid json payload')
+    expected_version = raw_payload.pop('_version', None)
     try:
         payload = SitePayload.model_validate(raw_payload)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors())
     payload_dict = _sanitize_site_payload_dict(payload.model_dump(by_alias=True))
-    write_data(payload_dict)
-    return {'ok': True}
+    try:
+        version = write_data(payload_dict, expected_version)
+    except VersionConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except (DataMissingError, DataCorruptError, DataValidationError, StorageError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    return {'ok': True, 'version': version}
+
+
+@router.get('/admin/backup')
+def download_backup(request: Request):
+    enforce_rate_limit(request, 'admin_site')
+    require_admin_session(request)
+    fd, name = tempfile.mkstemp(prefix='clm-studio-backup-', suffix='.zip')
+    os.close(fd)
+    target = Path(name)
+    try:
+        create_full_backup(target)
+    except (DataMissingError, DataCorruptError, DataValidationError, StorageError) as exc:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=503, detail=str(exc))
+    return FileResponse(
+        target,
+        media_type='application/zip',
+        filename='clm-studio-backup.zip',
+        background=BackgroundTask(target.unlink, missing_ok=True),
+    )
+
+
+@router.post('/admin/restore')
+def restore_backup(request: Request, file: UploadFile = File(...)):
+    enforce_rate_limit(request, 'admin_site')
+    require_admin_session(request)
+    require_csrf(request)
+    fd, name = tempfile.mkstemp(prefix='clm-studio-restore-', suffix='.zip')
+    source = Path(name)
+    try:
+        with os.fdopen(fd, 'wb') as handle:
+            total = 0
+            while chunk := file.file.read(1024 * 1024):
+                total += len(chunk)
+                if total > MAX_BACKUP_UPLOAD_SIZE:
+                    raise HTTPException(status_code=413, detail='backup file exceeds 1 GiB limit')
+                handle.write(chunk)
+            handle.flush()
+            os.fsync(handle.fileno())
+        version = restore_full_backup(source)
+    except (DataValidationError, zipfile.BadZipFile) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except (DataMissingError, DataCorruptError, StorageError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    finally:
+        source.unlink(missing_ok=True)
+    return {'ok': True, 'version': version}
 
 
 ALLOWED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.gif', '.mp4', '.webm', '.mov', '.heic', '.heif'}
@@ -269,6 +342,7 @@ def translate_service(request: Request, payload: TranslatePayload):
 
 
 @router.post('/admin/upload')
+@with_storage_lock
 def upload(request: Request, file: UploadFile = File(...)):
     enforce_rate_limit(request, 'upload')
     require_admin_session(request)

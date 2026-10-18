@@ -1,6 +1,49 @@
+import argparse
+import fcntl
+import hashlib
 import json
+import logging
+import os
+import shutil
+import stat
+import tempfile
+import zipfile
+from contextlib import contextmanager
 from copy import deepcopy
-from .config import SITE_FILE
+from datetime import datetime, timezone
+from functools import wraps
+from pathlib import Path, PurePosixPath
+from .config import DATA_DIR, SITE_FILE, UPLOADS_DIR
+
+
+logger = logging.getLogger(__name__)
+LOCK_FILE = DATA_DIR / '.site.lock'
+BACKUP_DIR = DATA_DIR / '.site-backups'
+RESTORE_BACKUP_DIR = DATA_DIR / '.restore-backups'
+BACKUP_RETENTION = 30
+RESTORE_BACKUP_RETENTION = 5
+MAX_ARCHIVE_MEMBERS = 10_000
+MAX_ARCHIVE_UNCOMPRESSED_BYTES = 5 * 1024 * 1024 * 1024
+
+
+class StorageError(RuntimeError):
+    """Base exception for safe persistent-storage failures."""
+
+
+class DataMissingError(StorageError):
+    pass
+
+
+class DataCorruptError(StorageError):
+    pass
+
+
+class DataValidationError(StorageError):
+    pass
+
+
+class VersionConflictError(StorageError):
+    pass
 
 
 DEFAULT_DATA = {
@@ -365,6 +408,126 @@ def normalize_data(data):
     return merged
 
 
+def validate_data(data):
+    if not isinstance(data, dict):
+        raise DataValidationError('site.json root must be a JSON object')
+    required_types = {
+        'site': dict,
+        'services': dict,
+        'portfolio': list,
+        'contacts': list,
+    }
+    for key, expected_type in required_types.items():
+        if key not in data:
+            raise DataValidationError(f'site.json is missing required field: {key}')
+        if not isinstance(data[key], expected_type):
+            raise DataValidationError(f'site.json field {key} must be {expected_type.__name__}')
+    for key in ('zh', 'en', 'branding'):
+        if not isinstance(data['site'].get(key), dict):
+            raise DataValidationError(f'site.json field site.{key} must be object')
+    for key in ('zh', 'en'):
+        if not isinstance(data['services'].get(key), list):
+            raise DataValidationError(f'site.json field services.{key} must be array')
+    return data
+
+
+def _read_raw_validated(path=None):
+    path = SITE_FILE if path is None else Path(path)
+    if not path.exists():
+        raise DataMissingError(f'data file does not exist: {path}')
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        logger.exception('Unable to read site data from %s', path)
+        raise StorageError(f'unable to read data file: {path}') from exc
+    try:
+        data = json.loads(raw.decode('utf-8'))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        logger.error('Invalid JSON in %s: %s', path, exc)
+        raise DataCorruptError(f'data file contains invalid JSON: {path}') from exc
+    validate_data(data)
+    return raw, data
+
+
+def data_version(raw: bytes) -> str:
+    return hashlib.sha256(raw).hexdigest()
+
+
+@contextmanager
+def _exclusive_lock():
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with LOCK_FILE.open('a+b') as lock_handle:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+
+
+def with_storage_lock(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        with _exclusive_lock():
+            return function(*args, **kwargs)
+    return wrapped
+
+
+def _fsync_directory(path: Path):
+    directory_fd = os.open(path, os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0))
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def _prune(directory: Path, pattern: str, retain: int):
+    files = sorted(directory.glob(pattern), key=lambda item: item.stat().st_mtime, reverse=True)
+    for old_file in files[retain:]:
+        old_file.unlink()
+
+
+def _backup_site_locked(raw: bytes) -> Path:
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    digest = data_version(raw)
+    timestamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
+    target = BACKUP_DIR / f'site-{timestamp}-{digest}.json'
+    try:
+        with target.open('xb') as handle:
+            handle.write(raw)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _fsync_directory(BACKUP_DIR)
+        _prune(BACKUP_DIR, 'site-*.json', BACKUP_RETENTION)
+    except Exception as exc:
+        logger.exception('Site backup failed; write aborted')
+        try:
+            target.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise StorageError('backup failed; data was not changed') from exc
+    return target
+
+
+def _atomic_replace_site_locked(serialized: bytes):
+    temp_path = None
+    try:
+        fd, name = tempfile.mkstemp(prefix='.site-', suffix='.tmp', dir=DATA_DIR)
+        temp_path = Path(name)
+        with os.fdopen(fd, 'wb') as handle:
+            handle.write(serialized)
+            handle.flush()
+            os.fsync(handle.fileno())
+        _fsync_directory(DATA_DIR)
+        os.replace(temp_path, SITE_FILE)
+        temp_path = None
+    except Exception as exc:
+        logger.exception('Atomic site data replacement failed')
+        raise StorageError('atomic replacement failed; previous data was preserved') from exc
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+
+
 def _looks_like_question_marks(value):
     text = str(value or '').strip()
     if not text:
@@ -397,29 +560,158 @@ def repair_known_corruption(data):
 
 
 def ensure_data():
-    if not SITE_FILE.exists():
-        SITE_FILE.write_text(json.dumps(normalize_data(DEFAULT_DATA), ensure_ascii=False, indent=2), encoding='utf-8')
-        return
-    try:
-        current = json.loads(SITE_FILE.read_text(encoding='utf-8'))
-    except Exception:
-        current = {}
-    normalized = repair_known_corruption(normalize_data(current))
-    SITE_FILE.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding='utf-8')
+    """Validate storage without mutating it. Kept for compatibility."""
+    _read_raw_validated()
 
 
 def read_data():
-    ensure_data()
-    try:
-        return json.loads(SITE_FILE.read_text(encoding='utf-8'))
-    except Exception:
-        normalized = repair_known_corruption(normalize_data(DEFAULT_DATA))
-        SITE_FILE.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding='utf-8')
-        return normalized
+    _, current = _read_raw_validated()
+    return repair_known_corruption(normalize_data(current))
 
 
-def write_data(data):
+def read_data_with_version():
+    raw, current = _read_raw_validated()
+    return repair_known_corruption(normalize_data(current)), data_version(raw)
+
+
+def write_data(data, expected_version: str):
+    if not expected_version:
+        raise VersionConflictError('data version is required')
     normalized = repair_known_corruption(normalize_data(data))
-    temp_file = SITE_FILE.with_suffix('.tmp')
-    temp_file.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding='utf-8')
-    temp_file.replace(SITE_FILE)
+    validate_data(normalized)
+    serialized = json.dumps(normalized, ensure_ascii=False, indent=2).encode('utf-8')
+    with _exclusive_lock():
+        current_raw, _ = _read_raw_validated()
+        if data_version(current_raw) != expected_version:
+            raise VersionConflictError('site data changed since it was loaded')
+        _backup_site_locked(current_raw)
+        _atomic_replace_site_locked(serialized)
+    return data_version(serialized)
+
+
+def initialize_data():
+    serialized = json.dumps(normalize_data(DEFAULT_DATA), ensure_ascii=False, indent=2).encode('utf-8')
+    with _exclusive_lock():
+        if SITE_FILE.exists():
+            raise StorageError(f'refusing to overwrite existing data file: {SITE_FILE}')
+        _atomic_replace_site_locked(serialized)
+    return data_version(serialized)
+
+
+def _safe_archive_member(info: zipfile.ZipInfo):
+    if '\\' in info.filename:
+        raise DataValidationError(f'unsafe archive path: {info.filename}')
+    path = PurePosixPath(info.filename)
+    if path.is_absolute() or '..' in path.parts or not path.parts:
+        raise DataValidationError(f'unsafe archive path: {info.filename}')
+    if path.parts[0] not in {'site.json', 'uploads'}:
+        raise DataValidationError(f'unexpected archive entry: {info.filename}')
+    mode = info.external_attr >> 16
+    if stat.S_ISLNK(mode):
+        raise DataValidationError(f'archive symlink is not allowed: {info.filename}')
+    if path.parts[0] == 'site.json' and len(path.parts) != 1:
+        raise DataValidationError(f'invalid site.json path: {info.filename}')
+
+
+def _validate_media_paths(value):
+    if isinstance(value, dict):
+        for nested in value.values():
+            _validate_media_paths(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            _validate_media_paths(nested)
+    elif isinstance(value, str) and value.startswith('/uploads/'):
+        relative = value.removeprefix('/uploads/').split('?', 1)[0].split('#', 1)[0]
+        path = PurePosixPath(relative)
+        if not relative or path.is_absolute() or '..' in path.parts or '\\' in relative:
+            raise DataValidationError(f'unsafe media path in site.json: {value}')
+
+
+def create_full_backup(destination: Path):
+    with _exclusive_lock():
+        _read_raw_validated()
+        with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+            archive.write(SITE_FILE, 'site.json')
+            if UPLOADS_DIR.exists():
+                for item in sorted(UPLOADS_DIR.rglob('*')):
+                    if item.is_symlink():
+                        raise StorageError(f'refusing to back up symlink: {item}')
+                    if item.is_file():
+                        archive.write(item, PurePosixPath('uploads', item.relative_to(UPLOADS_DIR).as_posix()))
+    return destination
+
+
+def _backup_current_state_locked():
+    RESTORE_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
+    target = RESTORE_BACKUP_DIR / f'before-restore-{timestamp}.zip'
+    try:
+        with zipfile.ZipFile(target, 'x', compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+            archive.write(SITE_FILE, 'site.json')
+            for item in sorted(UPLOADS_DIR.rglob('*')):
+                if item.is_symlink():
+                    raise StorageError(f'refusing to back up symlink: {item}')
+                if item.is_file():
+                    archive.write(item, PurePosixPath('uploads', item.relative_to(UPLOADS_DIR).as_posix()))
+        _prune(RESTORE_BACKUP_DIR, 'before-restore-*.zip', RESTORE_BACKUP_RETENTION)
+    except Exception as exc:
+        target.unlink(missing_ok=True)
+        raise StorageError('pre-restore backup failed; restore was not started') from exc
+
+
+def restore_full_backup(source: Path):
+    staging = Path(tempfile.mkdtemp(prefix='.restore-', dir=DATA_DIR))
+    try:
+        with zipfile.ZipFile(source, 'r') as archive:
+            infos = archive.infolist()
+            if len(infos) > MAX_ARCHIVE_MEMBERS:
+                raise DataValidationError('backup contains too many entries')
+            if sum(info.file_size for info in infos) > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
+                raise DataValidationError('backup uncompressed size exceeds safety limit')
+            names = [info.filename for info in infos]
+            if len(names) != len(set(names)):
+                raise DataValidationError('backup contains duplicate paths')
+            if not any(info.filename == 'site.json' for info in infos):
+                raise DataValidationError('backup does not contain site.json')
+            for info in infos:
+                _safe_archive_member(info)
+            archive.extractall(staging)
+        restored_raw, restored_data = _read_raw_validated(staging / 'site.json')
+        _validate_media_paths(restored_data)
+        restored_uploads = staging / 'uploads'
+        with _exclusive_lock():
+            current_raw, _ = _read_raw_validated()
+            _backup_site_locked(current_raw)
+            _backup_current_state_locked()
+            old_uploads = DATA_DIR / f'.uploads-old-{os.getpid()}-{os.urandom(4).hex()}'
+            try:
+                if UPLOADS_DIR.exists():
+                    os.replace(UPLOADS_DIR, old_uploads)
+                if restored_uploads.exists():
+                    os.replace(restored_uploads, UPLOADS_DIR)
+                else:
+                    UPLOADS_DIR.mkdir()
+                _atomic_replace_site_locked(restored_raw)
+            except Exception:
+                if UPLOADS_DIR.exists():
+                    shutil.rmtree(UPLOADS_DIR)
+                if old_uploads.exists():
+                    os.replace(old_uploads, UPLOADS_DIR)
+                raise
+            shutil.rmtree(old_uploads, ignore_errors=True)
+        return data_version(restored_raw)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+def _main():
+    parser = argparse.ArgumentParser(description='CLM Studio data storage administration')
+    parser.add_argument('command', choices=['init'], help='explicit storage operation')
+    args = parser.parse_args()
+    if args.command == 'init':
+        version = initialize_data()
+        print(f'Initialized {SITE_FILE} (version {version})')
+
+
+if __name__ == '__main__':
+    _main()
