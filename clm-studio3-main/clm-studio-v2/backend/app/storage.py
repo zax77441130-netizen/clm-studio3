@@ -46,6 +46,14 @@ class VersionConflictError(StorageError):
     pass
 
 
+class PostReplaceSyncError(StorageError):
+    """The rename completed, but syncing its parent directory failed."""
+
+
+class RestoreRollbackError(StorageError):
+    """A restore failed and its media rollback could not be completed."""
+
+
 DEFAULT_DATA = {
   "site": {
     "zh": {
@@ -480,10 +488,29 @@ def _fsync_directory(path: Path):
         os.close(directory_fd)
 
 
+def _fsync_tree_directories(root: Path):
+    directories = [item for item in root.rglob('*') if item.is_dir()]
+    for directory in sorted(directories, key=lambda item: len(item.parts), reverse=True):
+        _fsync_directory(directory)
+    _fsync_directory(root)
+
+
 def _prune(directory: Path, pattern: str, retain: int):
     files = sorted(directory.glob(pattern), key=lambda item: item.stat().st_mtime, reverse=True)
-    for old_file in files[retain:]:
-        old_file.unlink()
+    removed = False
+    try:
+        for old_file in files[retain:]:
+            old_file.unlink()
+            removed = True
+    finally:
+        if removed:
+            _fsync_directory(directory)
+
+
+def _remove_file_and_sync(path: Path):
+    if path.exists():
+        path.unlink()
+        _fsync_directory(path.parent)
 
 
 def _backup_site_locked(raw: bytes) -> Path:
@@ -501,7 +528,7 @@ def _backup_site_locked(raw: bytes) -> Path:
     except Exception as exc:
         logger.exception('Site backup failed; write aborted')
         try:
-            target.unlink(missing_ok=True)
+            _remove_file_and_sync(target)
         except OSError:
             pass
         raise StorageError('backup failed; data was not changed') from exc
@@ -510,6 +537,7 @@ def _backup_site_locked(raw: bytes) -> Path:
 
 def _atomic_replace_site_locked(serialized: bytes):
     temp_path = None
+    replaced = False
     try:
         fd, name = tempfile.mkstemp(prefix='.site-', suffix='.tmp', dir=DATA_DIR)
         temp_path = Path(name)
@@ -517,11 +545,16 @@ def _atomic_replace_site_locked(serialized: bytes):
             handle.write(serialized)
             handle.flush()
             os.fsync(handle.fileno())
-        _fsync_directory(DATA_DIR)
         os.replace(temp_path, SITE_FILE)
+        replaced = True
         temp_path = None
+        _fsync_directory(DATA_DIR)
     except Exception as exc:
         logger.exception('Atomic site data replacement failed')
+        if replaced:
+            raise PostReplaceSyncError(
+                'site data was replaced, but syncing the data directory failed; durability is uncertain'
+            ) from exc
         raise StorageError('atomic replacement failed; previous data was preserved') from exc
     finally:
         if temp_path is not None:
@@ -598,7 +631,7 @@ def initialize_data():
     return data_version(serialized)
 
 
-def _safe_archive_member(info: zipfile.ZipInfo):
+def _safe_archive_member(info: zipfile.ZipInfo) -> PurePosixPath:
     if '\\' in info.filename:
         raise DataValidationError(f'unsafe archive path: {info.filename}')
     path = PurePosixPath(info.filename)
@@ -611,6 +644,42 @@ def _safe_archive_member(info: zipfile.ZipInfo):
         raise DataValidationError(f'archive symlink is not allowed: {info.filename}')
     if path.parts[0] == 'site.json' and len(path.parts) != 1:
         raise DataValidationError(f'invalid site.json path: {info.filename}')
+    return PurePosixPath(*path.parts)
+
+
+def _validated_archive_members(infos: list[zipfile.ZipInfo]):
+    validated = []
+    entries = {}
+    for info in infos:
+        normalized = _safe_archive_member(info)
+        key = normalized.as_posix()
+        kind = 'directory' if info.is_dir() else 'file'
+        if key in entries:
+            raise DataValidationError(f'backup contains duplicate normalized path: {key}')
+        for parent in normalized.parents:
+            parent_key = parent.as_posix()
+            if parent_key == '.':
+                break
+            if entries.get(parent_key) == 'file':
+                raise DataValidationError(f'backup path conflicts with file: {parent_key}')
+        if kind == 'file' and any(existing.startswith(f'{key}/') for existing in entries):
+            raise DataValidationError(f'backup file conflicts with directory: {key}')
+        entries[key] = kind
+        validated.append((info, normalized))
+    return validated
+
+
+def _extract_validated_archive(archive: zipfile.ZipFile, members, destination: Path):
+    for info, normalized in members:
+        target = destination.joinpath(*normalized.parts)
+        if info.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with archive.open(info, 'r') as source, target.open('xb') as output:
+            shutil.copyfileobj(source, output)
+            output.flush()
+            os.fsync(output.fileno())
 
 
 def _validate_media_paths(value):
@@ -653,9 +722,15 @@ def _backup_current_state_locked():
                     raise StorageError(f'refusing to back up symlink: {item}')
                 if item.is_file():
                     archive.write(item, PurePosixPath('uploads', item.relative_to(UPLOADS_DIR).as_posix()))
+        with target.open('rb') as handle:
+            os.fsync(handle.fileno())
+        _fsync_directory(RESTORE_BACKUP_DIR)
         _prune(RESTORE_BACKUP_DIR, 'before-restore-*.zip', RESTORE_BACKUP_RETENTION)
     except Exception as exc:
-        target.unlink(missing_ok=True)
+        try:
+            _remove_file_and_sync(target)
+        except OSError:
+            pass
         raise StorageError('pre-restore backup failed; restore was not started') from exc
 
 
@@ -668,14 +743,11 @@ def restore_full_backup(source: Path):
                 raise DataValidationError('backup contains too many entries')
             if sum(info.file_size for info in infos) > MAX_ARCHIVE_UNCOMPRESSED_BYTES:
                 raise DataValidationError('backup uncompressed size exceeds safety limit')
-            names = [info.filename for info in infos]
-            if len(names) != len(set(names)):
-                raise DataValidationError('backup contains duplicate paths')
-            if not any(info.filename == 'site.json' for info in infos):
+            members = _validated_archive_members(infos)
+            if not any(path.as_posix() == 'site.json' for _, path in members):
                 raise DataValidationError('backup does not contain site.json')
-            for info in infos:
-                _safe_archive_member(info)
-            archive.extractall(staging)
+            _extract_validated_archive(archive, members, staging)
+            _fsync_tree_directories(staging)
         restored_raw, restored_data = _read_raw_validated(staging / 'site.json')
         _validate_media_paths(restored_data)
         restored_uploads = staging / 'uploads'
@@ -684,21 +756,45 @@ def restore_full_backup(source: Path):
             _backup_site_locked(current_raw)
             _backup_current_state_locked()
             old_uploads = DATA_DIR / f'.uploads-old-{os.getpid()}-{os.urandom(4).hex()}'
+            original_moved = False
+            new_installed = False
             try:
                 if UPLOADS_DIR.exists():
                     os.replace(UPLOADS_DIR, old_uploads)
+                    original_moved = True
+                    _fsync_directory(DATA_DIR)
                 if restored_uploads.exists():
                     os.replace(restored_uploads, UPLOADS_DIR)
                 else:
                     UPLOADS_DIR.mkdir()
+                new_installed = True
+                _fsync_directory(DATA_DIR)
                 _atomic_replace_site_locked(restored_raw)
-            except Exception:
-                if UPLOADS_DIR.exists():
-                    shutil.rmtree(UPLOADS_DIR)
-                if old_uploads.exists():
-                    os.replace(old_uploads, UPLOADS_DIR)
+            except PostReplaceSyncError:
+                # Both the new site file and media are installed. Do not roll
+                # media back to an old generation and create a mixed state.
                 raise
-            shutil.rmtree(old_uploads, ignore_errors=True)
+            except Exception as restore_error:
+                try:
+                    if new_installed and UPLOADS_DIR.exists():
+                        shutil.rmtree(UPLOADS_DIR)
+                        _fsync_directory(DATA_DIR)
+                    if original_moved and old_uploads.exists():
+                        os.replace(old_uploads, UPLOADS_DIR)
+                        _fsync_directory(DATA_DIR)
+                except Exception as rollback_error:
+                    raise RestoreRollbackError(
+                        f'restore failed and media rollback also failed; preserved media may remain at {old_uploads}'
+                    ) from rollback_error
+                raise restore_error
+            try:
+                if original_moved and old_uploads.exists():
+                    shutil.rmtree(old_uploads)
+                    _fsync_directory(DATA_DIR)
+            except Exception as exc:
+                raise PostReplaceSyncError(
+                    f'restore completed, but cleanup could not be synced; old media may remain at {old_uploads}'
+                ) from exc
         return data_version(restored_raw)
     finally:
         shutil.rmtree(staging, ignore_errors=True)

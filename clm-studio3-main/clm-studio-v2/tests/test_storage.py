@@ -26,6 +26,22 @@ def data_dir(tmp_path, monkeypatch):
     return tmp_path
 
 
+def _snapshot_site_and_uploads():
+    uploads = {
+        item.relative_to(storage.UPLOADS_DIR).as_posix(): item.read_bytes()
+        for item in storage.UPLOADS_DIR.rglob('*')
+        if item.is_file()
+    }
+    return storage.SITE_FILE.read_bytes(), uploads
+
+
+def _write_restore_archive(path, entries):
+    with zipfile.ZipFile(path, 'w') as output:
+        output.writestr('site.json', storage.SITE_FILE.read_bytes())
+        for name, content in entries:
+            output.writestr(name, content)
+
+
 def test_repeated_reads_do_not_modify_file(data_dir):
     before = storage.SITE_FILE.read_bytes()
     before_mtime = storage.SITE_FILE.stat().st_mtime_ns
@@ -85,6 +101,31 @@ def test_replace_failure_preserves_original(data_dir, monkeypatch):
     assert storage.SITE_FILE.read_bytes() == original
 
 
+def test_post_replace_sync_failure_reports_that_data_changed(data_dir, monkeypatch):
+    data, version = storage.read_data_with_version()
+    data['site']['zh']['studio_name'] = 'replacement completed'
+    original_replace = storage.os.replace
+    original_fsync_directory = storage._fsync_directory
+    site_was_replaced = False
+
+    def tracked_replace(source, destination):
+        nonlocal site_was_replaced
+        original_replace(source, destination)
+        if Path(destination) == storage.SITE_FILE:
+            site_was_replaced = True
+
+    def fail_after_site_replace(path):
+        if site_was_replaced and Path(path) == storage.DATA_DIR:
+            raise OSError('directory fsync failed')
+        original_fsync_directory(path)
+
+    monkeypatch.setattr(storage.os, 'replace', tracked_replace)
+    monkeypatch.setattr(storage, '_fsync_directory', fail_after_site_replace)
+    with pytest.raises(storage.PostReplaceSyncError, match='was replaced'):
+        storage.write_data(data, version)
+    assert json.loads(storage.SITE_FILE.read_text(encoding='utf-8'))['site']['zh']['studio_name'] == 'replacement completed'
+
+
 def _concurrent_writer(data_dir_string, worker_id):
     root = Path(data_dir_string)
     storage.DATA_DIR = root
@@ -136,6 +177,69 @@ def test_full_backup_restores_site_and_uploads(data_dir):
     assert restored_version == current_version
 
 
+def test_restore_first_upload_rename_failure_preserves_every_byte(data_dir, monkeypatch):
+    (storage.UPLOADS_DIR / 'first.bin').write_bytes(b'\x00old-first\xff')
+    nested = storage.UPLOADS_DIR / 'nested'
+    nested.mkdir()
+    (nested / 'second.bin').write_bytes(b'old-second')
+    archive = data_dir / 'restore.zip'
+    _write_restore_archive(archive, [('uploads/new.bin', b'new')])
+    before = _snapshot_site_and_uploads()
+    original_replace = storage.os.replace
+
+    def fail_first_upload_rename(source, destination):
+        if Path(source) == storage.UPLOADS_DIR:
+            raise OSError('injected first upload rename failure')
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(storage.os, 'replace', fail_first_upload_rename)
+    with pytest.raises(OSError, match='first upload rename failure'):
+        storage.restore_full_backup(archive)
+    assert _snapshot_site_and_uploads() == before
+
+
+def test_restore_fsyncs_parent_after_each_persistent_switch(data_dir, monkeypatch):
+    (storage.UPLOADS_DIR / 'old.bin').write_bytes(b'old')
+    archive = data_dir / 'restore-order.zip'
+    _write_restore_archive(archive, [('uploads/new.bin', b'new')])
+    original_replace = storage.os.replace
+    original_rmtree = storage.shutil.rmtree
+    original_fsync_directory = storage._fsync_directory
+    events = []
+
+    def tracked_replace(source, destination):
+        original_replace(source, destination)
+        events.append(('replace', Path(source), Path(destination)))
+
+    def tracked_rmtree(path, *args, **kwargs):
+        original_rmtree(path, *args, **kwargs)
+        events.append(('rmtree', Path(path)))
+
+    def tracked_fsync(path):
+        original_fsync_directory(path)
+        events.append(('fsync', Path(path)))
+
+    monkeypatch.setattr(storage.os, 'replace', tracked_replace)
+    monkeypatch.setattr(storage.shutil, 'rmtree', tracked_rmtree)
+    monkeypatch.setattr(storage, '_fsync_directory', tracked_fsync)
+    storage.restore_full_backup(archive)
+
+    persistent_changes = [
+        index for index, event in enumerate(events)
+        if (
+            event[0] == 'replace'
+            and (event[1] == storage.UPLOADS_DIR or event[2] in {storage.UPLOADS_DIR, storage.SITE_FILE})
+        ) or (
+            event[0] == 'rmtree'
+            and event[1].parent == storage.DATA_DIR
+            and event[1].name.startswith('.uploads-old-')
+        )
+    ]
+    assert len(persistent_changes) == 4
+    for index in persistent_changes:
+        assert events[index + 1] == ('fsync', storage.DATA_DIR)
+
+
 @pytest.mark.parametrize('unsafe_name', ['../escape.txt', '/absolute.txt', 'uploads/../../escape.txt'])
 def test_restore_rejects_unsafe_archive_paths(data_dir, unsafe_name):
     archive = data_dir / 'unsafe.zip'
@@ -146,6 +250,21 @@ def test_restore_rejects_unsafe_archive_paths(data_dir, unsafe_name):
     with pytest.raises(storage.DataValidationError):
         storage.restore_full_backup(archive)
     assert storage.SITE_FILE.read_bytes() == before
+
+
+@pytest.mark.parametrize('entries', [
+    [('uploads/a.png', b'one'), ('uploads/./a.png', b'two')],
+    [('uploads/item', b'file'), ('uploads/item/child.png', b'child')],
+    [('uploads/item/child.png', b'child'), ('uploads/item', b'file')],
+])
+def test_restore_rejects_normalized_duplicates_and_file_directory_conflicts(data_dir, entries):
+    (storage.UPLOADS_DIR / 'existing.bin').write_bytes(b'keep exactly')
+    before = _snapshot_site_and_uploads()
+    archive = data_dir / 'conflict.zip'
+    _write_restore_archive(archive, entries)
+    with pytest.raises(storage.DataValidationError):
+        storage.restore_full_backup(archive)
+    assert _snapshot_site_and_uploads() == before
 
 
 def test_restart_reads_persisted_content_and_media(data_dir):
