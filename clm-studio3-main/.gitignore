@@ -157,9 +157,11 @@ ENV/
 env.bak/
 venv.bak/
 
-# Runtime data safety artifacts (never commit production backups)
+# CLM runtime backups, restore transactions and temporary files
 **/data/.site-backups/
 **/data/.restore-backups/
+**/data/.restore-journal/
+**/data/.uploads-old-*/
 **/data/.site.lock
 **/data/.site-*.tmp
 **/data/.restore-*/

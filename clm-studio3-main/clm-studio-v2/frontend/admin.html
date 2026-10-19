@@ -41,6 +41,7 @@
         <div class="card-actions">
           <button class="btn btn-secondary" onclick="loadSite()">重新載入目前資料</button>
           <button class="btn btn-primary" onclick="saveAll()">一鍵儲存全部內容</button>
+          <button class="btn btn-secondary" type="button" onclick="downloadDraft()">下載編輯草稿</button>
           <button class="btn btn-secondary" type="button" onclick="downloadBackup()">下載完整備份</button>
           <label class="btn btn-secondary" style="cursor:pointer">還原完整備份<input id="restore_backup_file" type="file" accept=".zip,application/zip" hidden onchange="restoreBackup(this)"></label>
           <button class="btn btn-secondary" onclick="logoutAdmin()">登出</button>
@@ -492,11 +493,13 @@
 const API='/api';
 let DATA=null;
 let DIRTY=false;
+let EDIT_REVISION=0;
+let SAVE_IN_PROGRESS=false;
 let ADMIN_CSRF_TOKEN='';
 
 function v(id){ return document.getElementById(id); }
 function status(msg){ if(v('status')) v('status').textContent=msg; if(v('status2')) v('status2').textContent=msg; }
-function markDirty(){ DIRTY=true; status('你有尚未儲存的變更。完成後記得按「一鍵儲存全部內容」'); }
+function markDirty(){ DIRTY=true; EDIT_REVISION++; status('你有尚未儲存的變更。完成後記得按「一鍵儲存全部內容」'); }
 function clearDirty(){ DIRTY=false; }
 function setAttemptsText(msg){ if(v('attempts')) v('attempts').textContent=msg; }
 function togglePassword(){ const input=v('token'); if(input) input.type=input.type==='password'?'text':'password'; }
@@ -928,7 +931,10 @@ function collectSchemaFallbackFields(){
   DATA.fallbacks={ cover_image_from_first_media:v('fallback_cover_image_from_first_media').checked, summary_message_zh:readValue('fallback_summary_message_zh'), summary_message_en:readValue('fallback_summary_message_en'), detail_message_zh:readValue('fallback_detail_message_zh'), detail_message_en:readValue('fallback_detail_message_en'), seo_title_from_project_title:v('fallback_seo_title_from_project_title').checked, seo_description_from_summary:v('fallback_seo_description_from_summary').checked, og_image_default:readValue('fallback_og_image_default') };
 }
 
-async function loadSite(){
+async function loadSite(force=false){
+  if(SAVE_IN_PROGRESS){ status('儲存中，請稍候再重新載入。'); return; }
+  if(DIRTY && !force && !confirm('重新載入會放棄未儲存內容，建議先下載編輯草稿。確定繼續？')) return;
+  const revision=EDIT_REVISION;
   const verify = await fetch(`${API}/admin/verify`);
   if(verify.ok){
     const verifyData = await verify.json().catch(()=>({}));
@@ -937,6 +943,7 @@ async function loadSite(){
   const r=await fetch(`${API}/site`);
   const loaded=await r.json().catch(()=>({}));
   if(!r.ok){ status(stringifyErrorDetail(loaded.detail || '網站資料載入失敗')); return; }
+  if(EDIT_REVISION!==revision){ status('載入期間有新的編輯，已保留畫面內容；請下載草稿後再載入。'); return; }
   DATA=loaded; clearDirty(); ensureData(); repairCorruptedData();
   fillSiteFields(); renderContactsEditor(); renderServicesEditor(); fillSeoFields(); fillTemplateFields(); fillContentFields(); fillSchemaFallbackFields();
   refreshPortfolioSelect(); if(DATA.portfolio.length){ v('portfolio_select').value='0'; loadPortfolioItem(); }
@@ -970,29 +977,53 @@ function stringifyErrorDetail(detail){
   return String(detail);
 }
 
-async function saveAll(){
+function collectAllFields(){
   ensureData();
   collectSiteFields();
   collectContactsFields();
   collectServicesFields();
   const mediaOk = persistCurrentMediaIntoPortfolio();
-  if(mediaOk === false) return;
+  if(mediaOk === false) return false;
   syncCurrentPortfolioIntoData();
   collectSeoFields();
   collectTemplateFields();
   collectContentFields();
   collectSchemaFallbackFields();
+  return true;
+}
+
+async function saveAll(){
+  if(SAVE_IN_PROGRESS) return;
+  if(!DATA?._version){ status('請先成功載入網站資料再儲存。'); return; }
+  if(!collectAllFields()) return;
+  const revision=EDIT_REVISION;
+  SAVE_IN_PROGRESS=true;
+  try {
   const r=await fetch(`${API}/admin/site`, {method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token': ADMIN_CSRF_TOKEN}, body:JSON.stringify(DATA)});
   const d=await r.json().catch(()=>({}));
   if(r.ok){
     DATA._version=d.version || DATA._version;
-    clearDirty();
-    status('儲存成功，前台、SEO、模板與 fallback 設定已更新');
-    await loadSite();
+    if(EDIT_REVISION===revision){
+      clearDirty();
+      status('儲存成功，已建立上一版本備份。');
+    } else {
+      DIRTY=true;
+      status('先前內容已儲存；儲存期間新增的編輯仍保留，請再次儲存。');
+    }
   } else if(r.status===409){
     markDirty();
     status('儲存衝突：其他管理者已更新資料。你的未儲存內容仍保留；請先另行備份內容，再重新載入最新版本合併。');
-  } else status(stringifyErrorDetail(d.detail || d || '儲存失敗'));
+  } else { DIRTY=true; status(stringifyErrorDetail(d.detail || d || '儲存未確認，請保留草稿並核對網站狀態')); }
+  } catch(error){ DIRTY=true; status('連線中斷，儲存結果尚未確認。請下載草稿後核對，勿直接重新載入。'); }
+  finally { SAVE_IN_PROGRESS=false; }
+}
+
+function downloadDraft(){
+  if(!DATA || !collectAllFields()) return;
+  const url=URL.createObjectURL(new Blob([JSON.stringify(DATA,null,2)],{type:'application/json'}));
+  const link=document.createElement('a'); link.href=url; link.download='clm-unsaved-draft.json';
+  link.click(); setTimeout(()=>URL.revokeObjectURL(url),1000);
+  status('已下載編輯草稿（只有文字與媒體路徑，不含圖片檔）；不會儲存到網站。');
 }
 
 function downloadBackup(){
@@ -1002,15 +1033,24 @@ function downloadBackup(){
 async function restoreBackup(input){
   const file=input?.files?.[0];
   if(!file) return;
+  if(SAVE_IN_PROGRESS){ status('請等儲存完成後再還原。'); input.value=''; return; }
+  if(DIRTY && !confirm('還有未儲存編輯，請先下載草稿。仍要還原並放棄編輯？')){ input.value=''; return; }
   if(!confirm('還原會以備份內容取代目前網站資料與媒體。系統會先備份現況，確定繼續嗎？')){ input.value=''; return; }
   const form=new FormData(); form.append('file', file);
+  const restoreRevision=EDIT_REVISION;
   status('正在驗證並還原備份...');
+  SAVE_IN_PROGRESS=true;
+  try {
   const r=await fetch(`${API}/admin/restore`, {method:'POST', headers:{'X-CSRF-Token':ADMIN_CSRF_TOKEN}, body:form});
   const d=await r.json().catch(()=>({}));
   input.value='';
-  if(!r.ok){ status(stringifyErrorDetail(d.detail || '還原失敗，目前資料未變更')); return; }
+  if(!r.ok){ status(stringifyErrorDetail(d.detail || '還原未確認，請保留草稿並核對目前資料')); return; }
+  SAVE_IN_PROGRESS=false;
+  if(EDIT_REVISION!==restoreRevision){ status('還原完成，但期間有新的編輯；已保留畫面，請先下載草稿，再重新載入。'); return; }
   status('還原成功，正在重新載入資料');
-  await loadSite();
+  await loadSite(true);
+  } catch(error){ status('連線中斷，還原結果未確認；請勿重複還原，先核對網站狀態。'); }
+  finally { SAVE_IN_PROGRESS=false; input.value=''; }
 }
 
 async function uploadFile(file){ const fd=new FormData(); fd.append('file', file); const r=await fetch(`${API}/admin/upload`, {method:'POST', headers:{'X-CSRF-Token': ADMIN_CSRF_TOKEN}, body:fd}); return r.json(); }
@@ -1027,6 +1067,8 @@ async function uploadAssetToField(fileInputId, targetInputId, previewId){
   renderAssetPreview(previewId, d.path); toggleMediaFields(); if(input) input.value=''; markDirty(); status(`已上傳並套用：${d.path}，最後記得按「一鍵儲存全部內容」`);
 }
 
+document.getElementById('adminApp').addEventListener('input', e=>{ if(e.target.matches('input:not([type=file]),textarea,select')) markDirty(); });
+document.getElementById('adminApp').addEventListener('change', e=>{ if(e.target.matches('select,input[type=checkbox]')) markDirty(); });
 window.addEventListener('beforeunload', e=>{ if(DIRTY){ e.preventDefault(); e.returnValue=''; } });
 refreshLoginStatus();
 </script>

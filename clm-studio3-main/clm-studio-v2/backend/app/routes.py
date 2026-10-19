@@ -112,7 +112,7 @@ def health():
 def site():
     try:
         data, version = read_data_with_version()
-    except (DataMissingError, DataCorruptError, DataValidationError, StorageError) as exc:
+    except (DataMissingError, DataCorruptError, DataValidationError, StorageError, OSError) as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     data['_version'] = version
     return data
@@ -161,6 +161,8 @@ async def save_site(request: Request):
         raw_payload = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail='invalid json payload')
+    if not isinstance(raw_payload, dict):
+        raise HTTPException(status_code=422, detail='payload must be a JSON object')
     expected_version = raw_payload.pop('_version', None)
     try:
         payload = SitePayload.model_validate(raw_payload)
@@ -171,7 +173,7 @@ async def save_site(request: Request):
         version = write_data(payload_dict, expected_version)
     except VersionConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
-    except (DataMissingError, DataCorruptError, DataValidationError, StorageError) as exc:
+    except (DataMissingError, DataCorruptError, DataValidationError, StorageError, OSError) as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     return {'ok': True, 'version': version}
 
@@ -185,7 +187,7 @@ def download_backup(request: Request):
     target = Path(name)
     try:
         create_full_backup(target)
-    except (DataMissingError, DataCorruptError, DataValidationError, StorageError) as exc:
+    except (DataMissingError, DataCorruptError, DataValidationError, StorageError, OSError) as exc:
         target.unlink(missing_ok=True)
         raise HTTPException(status_code=503, detail=str(exc))
     return FileResponse(
@@ -216,7 +218,7 @@ def restore_backup(request: Request, file: UploadFile = File(...)):
         version = restore_full_backup(source)
     except (DataValidationError, zipfile.BadZipFile) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    except (DataMissingError, DataCorruptError, StorageError) as exc:
+    except (DataMissingError, DataCorruptError, StorageError, OSError) as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     finally:
         source.unlink(missing_ok=True)

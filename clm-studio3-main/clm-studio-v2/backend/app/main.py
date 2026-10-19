@@ -7,10 +7,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response, PlainTextResponse, HTMLResponse
 from .config import settings, UPLOADS_DIR
 from .routes import router
-from .storage import read_data
+from .storage import read_data, recover_pending_restore
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 FRONTEND_DIR = BASE_DIR / 'frontend'
+
+recover_pending_restore()
 
 app = FastAPI(title=settings.app_name)
 app.add_middleware(

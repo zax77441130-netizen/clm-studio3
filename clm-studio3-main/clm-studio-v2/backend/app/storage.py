@@ -13,6 +13,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path, PurePosixPath
+from urllib.parse import unquote, urlsplit
 from .config import DATA_DIR, SITE_FILE, UPLOADS_DIR
 
 
@@ -467,6 +468,7 @@ def _exclusive_lock():
     with LOCK_FILE.open('a+b') as lock_handle:
         fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
         try:
+            _recover_restore_locked()
             yield
         finally:
             fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
@@ -594,22 +596,26 @@ def repair_known_corruption(data):
 
 def ensure_data():
     """Validate storage without mutating it. Kept for compatibility."""
-    _read_raw_validated()
+    with _exclusive_lock():
+        _read_raw_validated()
 
 
 def read_data():
-    _, current = _read_raw_validated()
+    with _exclusive_lock():
+        _, current = _read_raw_validated()
     return repair_known_corruption(normalize_data(current))
 
 
 def read_data_with_version():
-    raw, current = _read_raw_validated()
+    with _exclusive_lock():
+        raw, current = _read_raw_validated()
     return repair_known_corruption(normalize_data(current)), data_version(raw)
 
 
 def write_data(data, expected_version: str):
     if not expected_version:
         raise VersionConflictError('data version is required')
+    validate_data(data)
     normalized = repair_known_corruption(normalize_data(data))
     validate_data(normalized)
     serialized = json.dumps(normalized, ensure_ascii=False, indent=2).encode('utf-8')
@@ -639,6 +645,10 @@ def _safe_archive_member(info: zipfile.ZipInfo) -> PurePosixPath:
         raise DataValidationError(f'unsafe archive path: {info.filename}')
     if path.parts[0] not in {'site.json', 'uploads'}:
         raise DataValidationError(f'unexpected archive entry: {info.filename}')
+    if path.as_posix() == 'uploads' and not info.is_dir():
+        raise DataValidationError('uploads must be a directory')
+    if path.as_posix() == 'site.json' and info.is_dir():
+        raise DataValidationError('site.json must be a file')
     mode = info.external_attr >> 16
     if stat.S_ISLNK(mode):
         raise DataValidationError(f'archive symlink is not allowed: {info.filename}')
@@ -682,18 +692,20 @@ def _extract_validated_archive(archive: zipfile.ZipFile, members, destination: P
             os.fsync(output.fileno())
 
 
-def _validate_media_paths(value):
+def _validate_media_paths(value, media_root=None):
     if isinstance(value, dict):
         for nested in value.values():
-            _validate_media_paths(nested)
+            _validate_media_paths(nested, media_root)
     elif isinstance(value, list):
         for nested in value:
-            _validate_media_paths(nested)
+            _validate_media_paths(nested, media_root)
     elif isinstance(value, str) and value.startswith('/uploads/'):
-        relative = value.removeprefix('/uploads/').split('?', 1)[0].split('#', 1)[0]
+        relative = unquote(urlsplit(value).path.removeprefix('/uploads/'))
         path = PurePosixPath(relative)
         if not relative or path.is_absolute() or '..' in path.parts or '\\' in relative:
             raise DataValidationError(f'unsafe media path in site.json: {value}')
+        if media_root is not None and not (Path(media_root) / relative).is_file():
+            raise DataValidationError(f'backup is missing referenced media: {value}')
 
 
 def create_full_backup(destination: Path):
@@ -734,6 +746,75 @@ def _backup_current_state_locked():
         raise StorageError('pre-restore backup failed; restore was not started') from exc
 
 
+def _durable_file(path: Path, content: bytes):
+    with path.open('xb') as handle:
+        handle.write(content)
+        handle.flush()
+        os.fsync(handle.fileno())
+    _fsync_directory(path.parent)
+
+
+def _write_restore_state(journal: Path, state: dict):
+    temp = journal / 'state.tmp'
+    with temp.open('wb') as handle:
+        handle.write(json.dumps(state).encode('utf-8'))
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temp, journal / 'state.json')
+    _fsync_directory(journal)
+
+
+def _recover_restore_locked():
+    """Rollback uncommitted restores before any storage operation; retryable after a crash."""
+    journal = DATA_DIR / '.restore-journal'
+    if not journal.exists():
+        return
+    state_file = journal / 'state.json'
+    if not state_file.exists():
+        # No switch can start before state.json is durable. Also handles interrupted cleanup.
+        _read_raw_validated()
+        shutil.rmtree(journal)
+        _fsync_directory(DATA_DIR)
+        return
+    try:
+        state = json.loads(state_file.read_bytes())
+        old_name = state['old_uploads']
+        if not isinstance(old_name, str) or not old_name.startswith('.uploads-old-') or Path(old_name).name != old_name:
+            raise ValueError('invalid old-media name')
+        if state['state'] not in {'prepared', 'committed'} or not isinstance(state['had_uploads'], bool):
+            raise ValueError('invalid journal state')
+        old_uploads = DATA_DIR / old_name
+        if state['state'] == 'prepared':
+            original_raw, _ = _read_raw_validated(journal / 'original-site.json')
+            if data_version(original_raw) != state['original_sha256']:
+                raise ValueError('original snapshot checksum mismatch')
+            if old_uploads.exists():
+                if UPLOADS_DIR.exists():
+                    shutil.rmtree(UPLOADS_DIR)
+                    _fsync_directory(DATA_DIR)
+                os.replace(old_uploads, UPLOADS_DIR)
+                _fsync_directory(DATA_DIR)
+            elif state['had_uploads'] and not UPLOADS_DIR.is_dir():
+                raise ValueError('original media is unavailable')
+            elif not state['had_uploads'] and UPLOADS_DIR.exists():
+                shutil.rmtree(UPLOADS_DIR)
+                _fsync_directory(DATA_DIR)
+            _atomic_replace_site_locked(original_raw)
+        elif old_uploads.exists():
+            shutil.rmtree(old_uploads)
+            _fsync_directory(DATA_DIR)
+        shutil.rmtree(journal)
+        _fsync_directory(DATA_DIR)
+    except Exception as exc:
+        logger.exception('Restore journal recovery failed; refusing further storage operations')
+        raise RestoreRollbackError('restore journal recovery failed; data was not reset; manual inspection required') from exc
+
+
+def recover_pending_restore():
+    with _exclusive_lock():
+        pass
+
+
 def restore_full_backup(source: Path):
     staging = Path(tempfile.mkdtemp(prefix='.restore-', dir=DATA_DIR))
     try:
@@ -749,52 +830,43 @@ def restore_full_backup(source: Path):
             _extract_validated_archive(archive, members, staging)
             _fsync_tree_directories(staging)
         restored_raw, restored_data = _read_raw_validated(staging / 'site.json')
-        _validate_media_paths(restored_data)
         restored_uploads = staging / 'uploads'
+        _validate_media_paths(restored_data, restored_uploads)
         with _exclusive_lock():
             current_raw, _ = _read_raw_validated()
             _backup_site_locked(current_raw)
             _backup_current_state_locked()
             old_uploads = DATA_DIR / f'.uploads-old-{os.getpid()}-{os.urandom(4).hex()}'
-            original_moved = False
-            new_installed = False
+            journal = DATA_DIR / '.restore-journal'
+            journal.mkdir()
+            _fsync_directory(DATA_DIR)
+            _durable_file(journal / 'original-site.json', current_raw)
+            state = {'state': 'prepared', 'old_uploads': old_uploads.name,
+                     'had_uploads': UPLOADS_DIR.exists(),
+                     'original_sha256': data_version(current_raw)}
+            _write_restore_state(journal, state)
             try:
                 if UPLOADS_DIR.exists():
                     os.replace(UPLOADS_DIR, old_uploads)
-                    original_moved = True
                     _fsync_directory(DATA_DIR)
                 if restored_uploads.exists():
                     os.replace(restored_uploads, UPLOADS_DIR)
                 else:
                     UPLOADS_DIR.mkdir()
-                new_installed = True
                 _fsync_directory(DATA_DIR)
                 _atomic_replace_site_locked(restored_raw)
-            except PostReplaceSyncError:
-                # Both the new site file and media are installed. Do not roll
-                # media back to an old generation and create a mixed state.
-                raise
+                state['state'] = 'committed'
+                _write_restore_state(journal, state)
             except Exception as restore_error:
                 try:
-                    if new_installed and UPLOADS_DIR.exists():
-                        shutil.rmtree(UPLOADS_DIR)
-                        _fsync_directory(DATA_DIR)
-                    if original_moved and old_uploads.exists():
-                        os.replace(old_uploads, UPLOADS_DIR)
-                        _fsync_directory(DATA_DIR)
+                    _recover_restore_locked()
                 except Exception as rollback_error:
                     raise RestoreRollbackError(
-                        f'restore failed and media rollback also failed; preserved media may remain at {old_uploads}'
+                        'restore recovery is pending; original data and journal are preserved; '
+                        'stop editing and retry after resolving the storage error'
                     ) from rollback_error
                 raise restore_error
-            try:
-                if original_moved and old_uploads.exists():
-                    shutil.rmtree(old_uploads)
-                    _fsync_directory(DATA_DIR)
-            except Exception as exc:
-                raise PostReplaceSyncError(
-                    f'restore completed, but cleanup could not be synced; old media may remain at {old_uploads}'
-                ) from exc
+            _recover_restore_locked()
         return data_version(restored_raw)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
